@@ -18,3 +18,4 @@ cpu_millicores = 100
 service = "github.com/zack/services/health-data"
 shortname = "health"
 version = ">=0.1.0"
+grants = ["full_access"]
