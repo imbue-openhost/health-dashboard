@@ -221,7 +221,7 @@ async function loadDashboard() {
   html += '<section id="last-night">';
   const isToday = lastReal && lastNightDay === today;
   if (lastReal && isToday) {
-    html += '<div class="section-title">Last Night\\'s Sleep <span class="date">' +
+    html += '<div class="section-title">Last Night\'s Sleep <span class="date">' +
       fmtDate(lastNightDay) + '</span></div>';
     const sleepScore = sv(lastReal.sleep_score) || sleepScoreMap[lastNightDay];
 
@@ -276,7 +276,7 @@ async function loadDashboard() {
 
     html += '</div>';
   } else {
-    html += '<div class="section-title">Last Night\\'s Sleep</div><div class="no-data">No data for last night yet.</div>';
+    html += '<div class="section-title">Last Night\'s Sleep</div><div class="no-data">No data for last night yet.</div>';
   }
   html += '</section>';
 
