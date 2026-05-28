@@ -6,7 +6,11 @@ dependencies = [
     "litestar>=2.0",
     "hypercorn>=0.17",
     "httpx>=0.27",
+    "health-data-service",
 ]
+
+[tool.uv.sources]
+health-data-service = { git = "https://github.com/imbue-openhost/health-data-service-spec", branch = "main" }
 
 [build-system]
 requires = ["hatchling"]
