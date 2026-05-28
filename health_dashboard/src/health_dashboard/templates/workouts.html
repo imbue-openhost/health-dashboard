@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workouts - Health Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9/dist/leaflet.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0f172a; color: #e2e8f0; padding: 1.5rem; max-width: 1100px; margin: 0 auto;
+  }
+  .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+  .header a { color: #64748b; text-decoration: none; font-size: 0.85rem; }
+  h1 { font-size: 1.5rem; }
+  .no-data { color: #475569; font-size: 0.9rem; padding: 2rem 0; text-align: center; }
+  .card { background: #1e293b; border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+  .card h3 {
+    font-size: 0.85rem; color: #64748b; margin-bottom: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem; }
+  .metric { padding: 0.6rem; background: #0f172a; border-radius: 8px; }
+  .metric .val { font-size: 1.15rem; font-weight: 700; }
+  .metric .lbl { font-size: 0.7rem; color: #64748b; margin-top: 0.15rem; }
+
+  .workout-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .workout-item {
+    background: #1e293b; border-radius: 10px; padding: 0.85rem 1rem;
+    cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    transition: background 0.15s;
+  }
+  .workout-item:hover { background: #334155; }
+  .workout-item.active { background: #334155; border-left: 3px solid #6366f1; }
+  .workout-item .wi-left { display: flex; flex-direction: column; gap: 0.15rem; }
+  .workout-item .wi-type { font-weight: 600; font-size: 0.95rem; text-transform: capitalize; }
+  .workout-item .wi-date { font-size: 0.75rem; color: #64748b; }
+  .workout-item .wi-right { text-align: right; font-size: 0.8rem; color: #94a3b8; }
+
+  #detail { display: none; }
+  #map { height: 350px; border-radius: 10px; margin-top: 0.5rem; }
+  .uplot { display: block; margin: 0 auto; }
+
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) { .detail-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <a href="/">&larr; Dashboard</a>
+  <h1>Workouts</h1>
+</div>
+<div id="app"></div>
+<div id="detail"></div>
+
+<script>
+const ROSE = '#f43f5e';
+const WORKOUT_ICONS = {
+  running: 'Run', cycling: 'Ride', swimming: 'Swim', walking: 'Walk',
+  hiking: 'Hike', strength: 'Strength', yoga: 'Yoga', other: 'Workout'
+};
+
+function toHM(seconds) {
+  if (!seconds) return '--';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
+}
+
+function sv(obj) { return obj ? obj.value : null; }
+
+let workouts = [];
+let map = null;
+let routeLayer = null;
+
+async function load() {
+  const resp = await fetch('/api/workouts?limit=50');
+  const data = await resp.json();
+  workouts = data.data || [];
+
+  const app = document.getElementById('app');
+  if (workouts.length === 0) {
+    app.innerHTML = '<div class="no-data">No workouts yet.</div>';
+    return;
+  }
+
+  let html = '<div class="workout-list">';
+  workouts.forEach(function(w, i) {
+    const type = WORKOUT_ICONS[w.workout_type] || w.workout_type;
+    const dur = w.duration ? toHM(sv(w.duration) * 60) : '';
+    const cal = w.calories ? Math.round(sv(w.calories)) + ' kcal' : '';
+    const dist = w.distance ? (sv(w.distance) / 1000).toFixed(1) + ' km' : '';
+    const rightParts = [dur, dist, cal].filter(Boolean);
+    html += '<div class="workout-item" data-idx="' + i + '">'
+      + '<div class="wi-left"><span class="wi-type">' + type + '</span>'
+      + '<span class="wi-date">' + fmtDate(w.start) + ' ' + fmtTime(w.start) + '</span></div>'
+      + '<div class="wi-right">' + rightParts.join(' &middot; ') + '</div>'
+      + '</div>';
+  });
+  html += '</div>';
+  app.innerHTML = html;
+
+  document.querySelectorAll('.workout-item').forEach(function(el) {
+    el.addEventListener('click', function() {
+      document.querySelectorAll('.workout-item').forEach(function(e) { e.classList.remove('active'); });
+      el.classList.add('active');
+      showDetail(parseInt(el.dataset.idx));
+    });
+  });
+
+  showDetail(0);
+  document.querySelector('.workout-item').classList.add('active');
+}
+
+function showDetail(idx) {
+  const w = workouts[idx];
+  const detail = document.getElementById('detail');
+  detail.style.display = 'block';
+
+  const type = WORKOUT_ICONS[w.workout_type] || w.workout_type;
+  const startTime = fmtTime(w.start);
+  const endTime = fmtTime(w.end);
+  const durSec = (new Date(w.end) - new Date(w.start)) / 1000;
+
+  let html = '<div class="card"><h3>' + type + ' &mdash; ' + fmtDate(w.start) + ', ' + startTime + ' - ' + endTime + '</h3>';
+  html += '<div class="metrics">';
+
+  const stats = [];
+  stats.push(['Duration', toHM(w.duration ? sv(w.duration) * 60 : durSec)]);
+  if (w.calories) stats.push(['Calories', Math.round(sv(w.calories)) + ' kcal']);
+  if (w.distance) {
+    const km = sv(w.distance) / 1000;
+    stats.push(['Distance', km.toFixed(2) + ' km']);
+    if (durSec > 0) {
+      const pace = durSec / km / 60;
+      stats.push(['Pace', Math.floor(pace) + ':' + String(Math.round((pace % 1) * 60)).padStart(2, '0') + ' /km']);
+    }
+  }
+  if (w.average_heart_rate) stats.push(['Avg HR', Math.round(sv(w.average_heart_rate)) + ' bpm']);
+  if (w.max_heart_rate) stats.push(['Max HR', Math.round(sv(w.max_heart_rate)) + ' bpm']);
+
+  stats.forEach(function(s) {
+    html += '<div class="metric"><div class="val">' + s[1] + '</div><div class="lbl">' + s[0] + '</div></div>';
+  });
+  html += '</div></div>';
+
+  const hasHR = w.heart_rate && w.heart_rate.samples && w.heart_rate.samples.length > 0;
+  const hasRoute = w.route && w.route.length > 0;
+
+  if (hasHR || hasRoute) {
+    html += '<div class="detail-grid">';
+    if (hasHR) html += '<div class="card"><h3>Heart Rate</h3><div id="hr-chart"></div></div>';
+    if (hasRoute) html += '<div class="card"><h3>Route</h3><div id="map"></div></div>';
+    html += '</div>';
+  }
+
+  detail.innerHTML = html;
+
+  if (hasHR) renderHR(w.heart_rate.samples);
+  if (hasRoute) renderMap(w.route);
+}
+
+function renderHR(samples) {
+  const container = document.getElementById('hr-chart');
+  const width = container.clientWidth - 8;
+
+  const ts = new Float64Array(samples.length);
+  const vals = new Float64Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    ts[i] = new Date(samples[i].timestamp).getTime() / 1000;
+    vals[i] = samples[i].value;
+  }
+
+  const yMin = Math.floor((Math.min(...vals) - 5) / 10) * 10;
+  const yMax = Math.ceil((Math.max(...vals) + 5) / 10) * 10;
+
+  new uPlot({
+    width: width, height: 220, pxAlign: 0,
+    cursor: { drag: { x: false, y: false } },
+    legend: { show: false },
+    scales: {
+      y: { range: [yMin, yMax] },
+    },
+    axes: [
+      { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
+        values: function(u, vs) {
+          return vs.map(function(v) {
+            var d = new Date(v * 1000);
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
+          });
+        }
+      },
+      { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
+        incrs: [10],
+      },
+    ],
+    series: [ {},
+      { stroke: ROSE, width: 1.5, fill: 'rgba(244,63,94,0.08)', points: { show: false } },
+    ],
+  }, [ts, vals], container);
+}
+
+function renderMap(route) {
+  if (map) { map.remove(); map = null; }
+
+  const mapEl = document.getElementById('map');
+  if (!mapEl) return;
+
+  map = L.map('map', { attributionControl: false, zoomControl: true });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+  }).addTo(map);
+
+  const coords = route.map(function(p) { return [p.lat, p.lon]; });
+  routeLayer = L.polyline(coords, { color: '#6366f1', weight: 3, opacity: 0.9 }).addTo(map);
+
+  L.circleMarker(coords[0], { radius: 6, color: '#10b981', fillColor: '#10b981', fillOpacity: 1 }).addTo(map);
+  L.circleMarker(coords[coords.length - 1], { radius: 6, color: '#f43f5e', fillColor: '#f43f5e', fillOpacity: 1 }).addTo(map);
+
+  map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
+}
+
+load();
+</script>
+</body>
+</html>

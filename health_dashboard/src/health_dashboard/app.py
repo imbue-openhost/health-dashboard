@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 _TEMPLATES = Path(__file__).parent / "templates"
 DASHBOARD_HTML = (_TEMPLATES / "dashboard.html").read_text()
 HEART_RATE_HTML = (_TEMPLATES / "heart_rate.html").read_text()
+WORKOUTS_HTML = (_TEMPLATES / "workouts.html").read_text()
 
 _client: HealthDataClient | None = None
 
@@ -60,6 +61,11 @@ async def index() -> Response:
 @get("/heart-rate")
 async def heart_rate_page() -> Response:
     return Response(content=HEART_RATE_HTML, media_type="text/html")
+
+
+@get("/workouts")
+async def workouts_page() -> Response:
+    return Response(content=WORKOUTS_HTML, media_type="text/html")
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +125,18 @@ async def proxy_workouts(request: Request) -> dict:
     if _client is None:
         return {"data": []}
     try:
-        req = WorkoutsRequest(
-            workout_type=request.query_params.get("workout_type"),
-            limit=int(request.query_params.get("limit", "100")),
+        params = dict(request.query_params)
+        if "limit" not in params:
+            params["limit"] = "100"
+        results = await _client._fan_out("/v1/workouts", params)
+        all_workouts: list[dict] = []
+        for r in results:
+            all_workouts.extend(r.get("data", []))
+        all_workouts.sort(
+            key=lambda w: datetime.fromisoformat(w.get("start", "2000-01-01T00:00:00+00:00")),
+            reverse=True,
         )
-        workouts = await _client.get_workouts_merged(req)
-        return {"data": [_serialize(w) for w in workouts]}
+        return {"data": all_workouts}
     except Exception:
         log.exception("Failed to fetch workouts")
         return {"data": []}
@@ -160,6 +172,7 @@ app = Litestar(
         health_check,
         index,
         heart_rate_page,
+        workouts_page,
         proxy_metrics,
         proxy_sleep_sessions,
         proxy_time_series,
