@@ -87,6 +87,11 @@ async def index() -> Response:
     return Response(content=DASHBOARD_HTML, media_type="text/html")
 
 
+@get("/heart-rate")
+async def heart_rate_page() -> Response:
+    return Response(content=HEART_RATE_HTML, media_type="text/html")
+
+
 # ---------------------------------------------------------------------------
 # API — fans out to all health-data providers and merges results
 # ---------------------------------------------------------------------------
@@ -598,10 +603,284 @@ loadDashboard();
 # App
 # ---------------------------------------------------------------------------
 
+HEART_RATE_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heart Rate</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0f172a; color: #e2e8f0; padding: 1.5rem; max-width: 1100px; margin: 0 auto;
+  }
+  .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+  .header a { color: #64748b; text-decoration: none; font-size: 0.85rem; }
+  h1 { font-size: 1.5rem; }
+  #main-wrap, #nav-wrap { background: #1e293b; border-radius: 12px; padding: 1rem; }
+  #nav-wrap { margin-top: 0.75rem; }
+  .loading { text-align: center; padding: 3rem; color: #64748b; }
+
+  .uplot { display: block; margin: 0 auto; }
+  .uplot .u-over { cursor: crosshair; }
+  .u-axis { pointer-events: none; }
+
+  /* Navigator selection + grips */
+  #nav-wrap .u-select {
+    pointer-events: all;
+    cursor: grab;
+    background: rgba(99,102,241,0.15);
+    border-left: 2px solid #6366f1;
+    border-right: 2px solid #6366f1;
+  }
+  #nav-wrap .u-select:active { cursor: grabbing; }
+  .u-grip {
+    position: absolute;
+    width: 8px;
+    height: 100%;
+    top: 0;
+    cursor: ew-resize;
+    background: #6366f1;
+    border-radius: 2px;
+    opacity: 0.9;
+  }
+  .u-grip-l { left: -4px; }
+  .u-grip-r { right: -4px; }
+
+  /* Curtains over un-selected range */
+  #nav-wrap .u-over { position: relative; }
+  .nav-curtain {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(15,23,42,0.6);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <a href="/">&larr; Dashboard</a>
+  <h1>Heart Rate</h1>
+</div>
+<div id="main-wrap"><div class="loading">Loading...</div></div>
+<div id="nav-wrap"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.js"></script>
+<script>
+(function() {
+  const ROSE = '#f43f5e';
+
+  function debounce(fn) {
+    let raf;
+    return function() {
+      const args = arguments, self = this;
+      if (raf) return;
+      raf = requestAnimationFrame(function() { fn.apply(self, args); raf = null; });
+    };
+  }
+
+  function placeDiv(par, cls) {
+    const el = document.createElement('div');
+    el.className = cls;
+    par.appendChild(el);
+    return el;
+  }
+
+  const now = Date.now() / 1000;
+  const t24h = now - 24 * 3600;
+  const t3h  = now - 3 * 3600;
+  const startISO = new Date(t24h * 1000).toISOString();
+
+  fetch('/api/time-series?metric=heart_rate&start=' + startISO)
+    .then(function(r) { return r.json(); })
+    .then(function(resp) { render(resp.samples || []); })
+    .catch(function() {
+      document.getElementById('main-wrap').innerHTML = '<div class="loading">Could not load heart rate data.</div>';
+    });
+
+  function render(samples) {
+    if (samples.length === 0) {
+      document.getElementById('main-wrap').innerHTML = '<div class="loading">No heart rate data in the last 24 hours.</div>';
+      return;
+    }
+
+    const ts = new Float64Array(samples.length);
+    const vals = new Float64Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      ts[i] = new Date(samples[i].timestamp).getTime() / 1000;
+      vals[i] = samples[i].value;
+    }
+    const data = [ts, vals];
+
+    const width = Math.min(document.getElementById('main-wrap').clientWidth - 32, 1050);
+
+    document.getElementById('main-wrap').innerHTML = '';
+    document.getElementById('nav-wrap').innerHTML = '';
+
+    let uNav, uMain;
+    let navLftCurtain, navRgtCurtain;
+
+    // ---- Main (zoomed) chart ----
+    const mainOpts = {
+      width: width,
+      height: 340,
+      pxAlign: 0,
+      cursor: {
+        drag: { x: true, y: false },
+      },
+      select: { over: false },
+      scales: {
+        x: { min: t3h, max: now },
+        y: { auto: true },
+      },
+      axes: [
+        { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui', },
+        { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui',
+          values: function(u, vals) { return vals.map(function(v) { return v + ' bpm'; }); },
+        },
+      ],
+      series: [
+        {},
+        { stroke: ROSE, width: 1.5, fill: 'rgba(244,63,94,0.08)', label: 'HR' },
+      ],
+      hooks: {
+        setScale: [
+          function(u) {
+            if (!uNav) return;
+            const xMin = u.scales.x.min;
+            const xMax = u.scales.x.max;
+            const left = Math.round(uNav.valToPos(xMin, 'x'));
+            const right = Math.round(uNav.valToPos(xMax, 'x'));
+            uNav.setSelect({ left: left, width: right - left, height: uNav.bbox.height / devicePixelRatio }, false);
+            updateCurtains();
+          },
+        ],
+      },
+    };
+
+    uMain = new uPlot(mainOpts, data, document.getElementById('main-wrap'));
+
+    // ---- Navigator (ranger) chart ----
+    function updateCurtains() {
+      if (!navLftCurtain || !uNav) return;
+      const sel = uNav.select;
+      navLftCurtain.style.left = '0';
+      navLftCurtain.style.width = sel.left + 'px';
+      navRgtCurtain.style.left = (sel.left + sel.width) + 'px';
+      navRgtCurtain.style.width = (uNav.bbox.width / devicePixelRatio - sel.left - sel.width) + 'px';
+    }
+
+    const BOUNDARY_LEFT = 0, BOUNDARY_RIGHT = 1, BOUNDARY_BOTH = 2;
+    let x0, lft0, rgt0;
+
+    function zoom(newLft, newWid) {
+      const min = uNav.posToVal(newLft, 'x');
+      const max = uNav.posToVal(newLft + newWid, 'x');
+      uMain.setScale('x', { min: min, max: max });
+    }
+
+    function update(newLft, newRgt, boundary) {
+      const maxRgt = uNav.bbox.width / devicePixelRatio;
+      if (boundary === BOUNDARY_BOTH) {
+        const w = newRgt - newLft;
+        if (newRgt > maxRgt) { newRgt = maxRgt; newLft = newRgt - w; }
+        else if (newLft < 0) { newLft = 0; newRgt = newLft + w; }
+      } else {
+        if (newLft > newRgt) {
+          if (boundary === BOUNDARY_LEFT) newLft = newRgt;
+          else newRgt = newLft;
+        }
+        newLft = Math.max(0, newLft);
+        newRgt = Math.min(newRgt, maxRgt);
+      }
+      zoom(newLft, newRgt - newLft);
+    }
+
+    function bindMove(e, onMove) {
+      x0 = e.clientX;
+      lft0 = uNav.select.left;
+      rgt0 = lft0 + uNav.select.width;
+      const _onMove = debounce(onMove);
+      function _onUp() {
+        document.removeEventListener('mouseup', _onUp);
+        document.removeEventListener('mousemove', _onMove);
+      }
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+      e.stopPropagation();
+    }
+
+    const navOpts = {
+      width: width,
+      height: 80,
+      pxAlign: 0,
+      cursor: {
+        x: false,
+        y: false,
+        points: { show: false },
+        drag: { setScale: false, setSelect: true, x: true, y: false },
+      },
+      legend: { show: false },
+      scales: { x: {}, y: { auto: true } },
+      axes: [
+        { stroke: '#64748b', grid: { show: false }, ticks: { stroke: '#334155' }, font: '10px system-ui' },
+        { show: false },
+      ],
+      series: [
+        {},
+        { stroke: ROSE, width: 1, fill: 'rgba(244,63,94,0.06)' },
+      ],
+      hooks: {
+        ready: [
+          function(u) {
+            const left = Math.round(u.valToPos(t3h, 'x'));
+            const right = Math.round(u.valToPos(now, 'x'));
+            const height = u.bbox.height / devicePixelRatio;
+            u.setSelect({ left: left, width: right - left, height: height }, false);
+
+            const over = u.root.querySelector('.u-over');
+            navLftCurtain = placeDiv(over, 'nav-curtain');
+            navRgtCurtain = placeDiv(over, 'nav-curtain');
+            updateCurtains();
+
+            const sel = u.root.querySelector('.u-select');
+            sel.addEventListener('mousedown', function(e) {
+              bindMove(e, function(e) { update(lft0 + (e.clientX - x0), rgt0 + (e.clientX - x0), BOUNDARY_BOTH); });
+            });
+            placeDiv(sel, 'u-grip u-grip-l').addEventListener('mousedown', function(e) {
+              bindMove(e, function(e) { update(lft0 + (e.clientX - x0), rgt0, BOUNDARY_LEFT); });
+            });
+            placeDiv(sel, 'u-grip u-grip-r').addEventListener('mousedown', function(e) {
+              bindMove(e, function(e) { update(lft0, rgt0 + (e.clientX - x0), BOUNDARY_RIGHT); });
+            });
+          },
+        ],
+        setSelect: [
+          function(u) {
+            zoom(u.select.left, u.select.width);
+            updateCurtains();
+          },
+        ],
+      },
+    };
+
+    uNav = new uPlot(navOpts, data, document.getElementById('nav-wrap'));
+  }
+})();
+</script>
+</body>
+</html>"""
+
+
 app = Litestar(
     route_handlers=[
         health_check,
         index,
+        heart_rate_page,
         proxy_metrics,
         proxy_sleep_sessions,
         proxy_time_series,
