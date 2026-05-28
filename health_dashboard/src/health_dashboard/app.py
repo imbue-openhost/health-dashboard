@@ -173,6 +173,8 @@ DASHBOARD_HTML = """\
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Health Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -213,6 +215,45 @@ DASHBOARD_HTML = """\
     background: #7f1d1d; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;
     display: none; font-size: 0.875rem;
   }
+
+  /* Heart rate chart */
+  #hr-section { margin-bottom: 2rem; }
+  #hr-section .section-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.75rem; }
+  #hr-main-wrap { background: #1e293b; border-radius: 12px 12px 0 0; padding: 1rem 1rem 0.5rem; }
+  #hr-nav-wrap { background: #1e293b; border-radius: 0 0 12px 12px; padding: 0 1rem 0.75rem; position: relative; }
+  .uplot { display: block; margin: 0 auto; }
+
+  /* Navigator overlay */
+  .nav-overlay {
+    position: absolute; pointer-events: none;
+  }
+  .nav-curtain {
+    position: absolute; top: 0; height: 100%;
+    background: rgba(15,23,42,0.55); pointer-events: all; cursor: pointer;
+  }
+  .nav-curtain-l { left: 0; }
+  .nav-curtain-r { right: 0; }
+  .nav-sel {
+    position: absolute; top: 0; height: 100%;
+    pointer-events: all; cursor: grab;
+    border-left: 1px solid rgba(148,163,184,0.4);
+    border-right: 1px solid rgba(148,163,184,0.4);
+  }
+  .nav-sel:active { cursor: grabbing; }
+  .nav-handle {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 14px; height: 28px;
+    background: #475569; border: 1px solid #64748b; border-radius: 3px;
+    cursor: ew-resize; pointer-events: all;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .nav-handle::after {
+    content: ''; display: block;
+    width: 4px; height: 10px;
+    border-left: 1px solid #94a3b8; border-right: 1px solid #94a3b8;
+  }
+  .nav-handle-l { left: -7px; }
+  .nav-handle-r { right: -7px; }
 </style>
 </head>
 <body>
@@ -220,6 +261,11 @@ DASHBOARD_HTML = """\
   <h1>Health Dashboard</h1>
 </div>
 <div class="error-banner" id="errorBanner"></div>
+<div id="hr-section">
+  <div class="section-title">Heart Rate</div>
+  <div id="hr-main-wrap"></div>
+  <div id="hr-nav-wrap"></div>
+</div>
 <div id="app"></div>
 
 <script>
@@ -592,6 +638,203 @@ async function loadDashboard() {
     });
   }
 }
+
+// ---- Heart Rate Explorer (uPlot + custom navigator) ----
+(function() {
+  const ROSE = '#f43f5e';
+  const nowSec = Date.now() / 1000;
+  const t24h = nowSec - 24 * 3600;
+  const t3h  = nowSec - 3 * 3600;
+  const startISO = new Date(t24h * 1000).toISOString();
+
+  fetch('/api/time-series?metric=heart_rate&start=' + startISO)
+    .then(function(r) { return r.json(); })
+    .then(function(resp) { renderHR(resp.samples || []); })
+    .catch(function() {});
+
+  function renderHR(samples) {
+    if (samples.length === 0) {
+      document.getElementById('hr-section').style.display = 'none';
+      return;
+    }
+
+    const ts = new Float64Array(samples.length);
+    const vals = new Float64Array(samples.length);
+    for (var i = 0; i < samples.length; i++) {
+      ts[i] = new Date(samples[i].timestamp).getTime() / 1000;
+      vals[i] = samples[i].value;
+    }
+    var data = [ts, vals];
+
+    var mainWrap = document.getElementById('hr-main-wrap');
+    var navWrap = document.getElementById('hr-nav-wrap');
+    var width = mainWrap.clientWidth - 16;
+
+    var uMain, uNav;
+
+    // State for the navigator selection (in pixels relative to nav plot area)
+    var selLeft = 0, selWidth = 0;
+    var navPlotLeft = 0, navPlotWidth = 0;
+
+    function selToScale() {
+      var min = uNav.posToVal(selLeft, 'x');
+      var max = uNav.posToVal(selLeft + selWidth, 'x');
+      uMain.setScale('x', { min: min, max: max });
+    }
+
+    function scaleToSel() {
+      selLeft = Math.round(uNav.valToPos(uMain.scales.x.min, 'x'));
+      var r = Math.round(uNav.valToPos(uMain.scales.x.max, 'x'));
+      selWidth = r - selLeft;
+      positionOverlay();
+    }
+
+    // --- Main chart ---
+    var mainOpts = {
+      width: width, height: 300, pxAlign: 0,
+      cursor: { drag: { x: true, y: false } },
+      select: { over: false },
+      scales: { x: { min: t3h, max: nowSec }, y: { auto: true } },
+      axes: [
+        { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui' },
+        { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui',
+          values: function(u, vs) { return vs.map(function(v) { return v + ''; }); } },
+      ],
+      series: [ {}, { stroke: ROSE, width: 1.5, fill: 'rgba(244,63,94,0.06)', label: 'bpm' } ],
+      hooks: { setScale: [ function() { if (uNav) scaleToSel(); } ] },
+    };
+    uMain = new uPlot(mainOpts, data, mainWrap);
+
+    // --- Navigator chart (no cursor/selection - fully custom) ---
+    var navOpts = {
+      width: width, height: 60, pxAlign: 0,
+      cursor: { show: false },
+      select: { show: false },
+      legend: { show: false },
+      scales: { y: { auto: true } },
+      axes: [
+        { stroke: '#64748b', grid: { show: false }, ticks: { stroke: '#334155' }, font: '10px system-ui' },
+        { show: false },
+      ],
+      series: [ {}, { stroke: ROSE, width: 1, fill: 'rgba(244,63,94,0.04)' } ],
+    };
+    uNav = new uPlot(navOpts, data, navWrap);
+
+    // --- Custom overlay ---
+    var over = uNav.root.querySelector('.u-over');
+    var bbox = over.getBoundingClientRect();
+    navPlotWidth = over.clientWidth;
+
+    var overlay = document.createElement('div');
+    overlay.className = 'nav-overlay';
+    overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+
+    var curtainL = document.createElement('div');
+    curtainL.className = 'nav-curtain nav-curtain-l';
+    var curtainR = document.createElement('div');
+    curtainR.className = 'nav-curtain nav-curtain-r';
+    var sel = document.createElement('div');
+    sel.className = 'nav-sel';
+    var handleL = document.createElement('div');
+    handleL.className = 'nav-handle nav-handle-l';
+    var handleR = document.createElement('div');
+    handleR.className = 'nav-handle nav-handle-r';
+
+    sel.appendChild(handleL);
+    sel.appendChild(handleR);
+    overlay.appendChild(curtainL);
+    overlay.appendChild(sel);
+    overlay.appendChild(curtainR);
+    over.style.position = 'relative';
+    over.appendChild(overlay);
+
+    function positionOverlay() {
+      var maxW = over.clientWidth;
+      var l = Math.max(0, Math.min(selLeft, maxW));
+      var w = Math.max(0, Math.min(selWidth, maxW - l));
+      curtainL.style.left = '0';
+      curtainL.style.width = l + 'px';
+      sel.style.left = l + 'px';
+      sel.style.width = w + 'px';
+      curtainR.style.left = (l + w) + 'px';
+      curtainR.style.width = (maxW - l - w) + 'px';
+    }
+
+    // Initial position: last 3 hours
+    selLeft = Math.round(uNav.valToPos(t3h, 'x'));
+    selWidth = Math.round(uNav.valToPos(nowSec, 'x')) - selLeft;
+    positionOverlay();
+
+    // --- Drag interaction ---
+    function clampSel(l, w) {
+      var maxW = over.clientWidth;
+      if (l < 0) l = 0;
+      if (l + w > maxW) l = maxW - w;
+      if (w < 10) w = 10;
+      return [l, w];
+    }
+
+    function startDrag(e, mode) {
+      e.preventDefault();
+      e.stopPropagation();
+      var startX = e.clientX;
+      var origL = selLeft, origW = selWidth;
+
+      function onMove(e) {
+        var dx = e.clientX - startX;
+        var maxW = over.clientWidth;
+        if (mode === 'pan') {
+          var nl = origL + dx;
+          if (nl < 0) nl = 0;
+          if (nl + origW > maxW) nl = maxW - origW;
+          selLeft = nl; selWidth = origW;
+        } else if (mode === 'left') {
+          var nl = origL + dx;
+          var nr = origL + origW;
+          if (nl < 0) nl = 0;
+          if (nl > nr - 10) nl = nr - 10;
+          selLeft = nl; selWidth = nr - nl;
+        } else if (mode === 'right') {
+          var nw = origW + dx;
+          if (nw < 10) nw = 10;
+          if (origL + nw > maxW) nw = maxW - origL;
+          selLeft = origL; selWidth = nw;
+        }
+        positionOverlay();
+        selToScale();
+      }
+
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
+    sel.addEventListener('mousedown', function(e) {
+      if (e.target === handleL || e.target === handleR) return;
+      startDrag(e, 'pan');
+    });
+    handleL.addEventListener('mousedown', function(e) { startDrag(e, 'left'); });
+    handleR.addEventListener('mousedown', function(e) { startDrag(e, 'right'); });
+
+    // Click on curtain: jump selection center there
+    function curtainClick(e) {
+      var rect = over.getBoundingClientRect();
+      var clickX = e.clientX - rect.left;
+      var newL = clickX - selWidth / 2;
+      var maxW = over.clientWidth;
+      if (newL < 0) newL = 0;
+      if (newL + selWidth > maxW) newL = maxW - selWidth;
+      selLeft = newL;
+      positionOverlay();
+      selToScale();
+    }
+    curtainL.addEventListener('click', curtainClick);
+    curtainR.addEventListener('click', curtainClick);
+  }
+})();
 
 loadDashboard();
 </script>
