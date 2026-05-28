@@ -37,7 +37,7 @@
   .workout-item:hover { background: #334155; }
   .workout-item.active { background: #334155; border-left: 3px solid #6366f1; }
   .workout-item .wi-left { display: flex; flex-direction: column; gap: 0.15rem; }
-  .workout-item .wi-type { font-weight: 600; font-size: 0.95rem; text-transform: capitalize; }
+  .workout-item .wi-type { font-weight: 600; font-size: 0.95rem; }
   .workout-item .wi-date { font-size: 0.75rem; color: #64748b; }
   .workout-item .wi-right { text-align: right; font-size: 0.8rem; color: #94a3b8; }
 
@@ -46,7 +46,14 @@
   .uplot { display: block; margin: 0 auto; }
 
   .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .detail-full { margin-bottom: 1rem; }
   @media (max-width: 700px) { .detail-grid { grid-template-columns: 1fr; } }
+
+  .splits-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .splits-table th { text-align: left; color: #64748b; font-weight: 500; padding: 0.4rem 0.5rem; border-bottom: 1px solid #334155; }
+  .splits-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid #1e293b; }
+  .splits-table tr:hover { background: #0f172a; }
+  .pace-bar { height: 4px; border-radius: 2px; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -58,57 +65,124 @@
 <div id="detail"></div>
 
 <script>
-const ROSE = '#f43f5e';
-const WORKOUT_ICONS = {
-  running: 'Run', cycling: 'Ride', swimming: 'Swim', walking: 'Walk',
-  hiking: 'Hike', strength: 'Strength', yoga: 'Yoga', other: 'Workout'
+const C = { rose: '#f43f5e', indigo: '#6366f1', emerald: '#10b981', amber: '#f59e0b', cyan: '#06b6d4', slate: '#64748b' };
+
+const TYPE_NAMES = {
+  running: 'Running', cycling: 'Cycling', swimming: 'Swimming', walking: 'Walking',
+  hiking: 'Hiking', strength: 'Strength Training', yoga: 'Yoga', other: 'Workout'
 };
-
-function toHM(seconds) {
-  if (!seconds) return '--';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.round((seconds % 3600) / 60);
-  return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
-}
-
-function fmtDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-function fmtTime(iso) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
-}
 
 function sv(obj) { return obj ? obj.value : null; }
 
-let workouts = [];
-let map = null;
-let routeLayer = null;
+function toHM(seconds) {
+  if (!seconds || seconds <= 0) return '--';
+  var h = Math.floor(seconds / 3600), m = Math.round((seconds % 3600) / 60);
+  return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+}
+
+function toHMS(seconds) {
+  if (!seconds || seconds <= 0) return '--';
+  var h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = Math.round(seconds % 60);
+  if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function fmtPace(secPerKm) {
+  if (!secPerKm || !isFinite(secPerKm)) return '--';
+  var m = Math.floor(secPerKm / 60), s = Math.round(secPerKm % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  var R = 6371000;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLon = (lon2 - lon1) * Math.PI / 180;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function analyzeRoute(route) {
+  var totalDist = 0, elevGain = 0, elevLoss = 0;
+  var distances = [0];
+  var elevations = [];
+  var timestamps = [];
+
+  for (var i = 0; i < route.length; i++) {
+    timestamps.push(new Date(route[i].timestamp).getTime() / 1000);
+    if (route[i].altitude != null) elevations.push(route[i].altitude);
+    if (i > 0) {
+      var d = haversine(route[i - 1].lat, route[i - 1].lon, route[i].lat, route[i].lon);
+      totalDist += d;
+      distances.push(totalDist);
+      if (route[i].altitude != null && route[i - 1].altitude != null) {
+        var dElev = route[i].altitude - route[i - 1].altitude;
+        if (dElev > 0.5) elevGain += dElev;
+        else if (dElev < -0.5) elevLoss -= dElev;
+      }
+    }
+  }
+
+  var splits = [];
+  var splitIdx = 0;
+  for (var km = 1; km * 1000 <= totalDist + 1; km++) {
+    var target = km * 1000;
+    while (splitIdx < distances.length - 1 && distances[splitIdx + 1] < target) splitIdx++;
+    if (splitIdx < timestamps.length - 1) {
+      var frac = (target - distances[splitIdx]) / (distances[splitIdx + 1] - distances[splitIdx] || 1);
+      var splitTime = timestamps[splitIdx] + frac * (timestamps[splitIdx + 1] - timestamps[splitIdx]);
+      var prevTarget = (km - 1) * 1000;
+      var prevIdx = 0;
+      for (var j = 0; j < distances.length; j++) { if (distances[j] <= prevTarget) prevIdx = j; }
+      var prevFrac = prevTarget > 0 ? (prevTarget - distances[prevIdx]) / (distances[prevIdx + 1] - distances[prevIdx] || 1) : 0;
+      var prevTime = km === 1 ? timestamps[0] : timestamps[prevIdx] + prevFrac * (timestamps[prevIdx + 1] - timestamps[prevIdx]);
+      var splitElev = null;
+      if (elevations.length > splitIdx) {
+        var startElev = km === 1 ? elevations[0] : elevations[prevIdx];
+        var endElev = elevations[splitIdx];
+        splitElev = endElev - startElev;
+      }
+      splits.push({ km: km, pace: splitTime - prevTime, elev: splitElev });
+    }
+  }
+
+  return { totalDist: totalDist, elevGain: elevGain, elevLoss: elevLoss, distances: distances, elevations: elevations, timestamps: timestamps, splits: splits };
+}
+
+var workouts = [];
+var map = null;
 
 async function load() {
-  const resp = await fetch('/api/workouts?limit=50');
-  const data = await resp.json();
+  var resp = await fetch('/api/workouts?limit=50');
+  var data = await resp.json();
   workouts = data.data || [];
 
-  const app = document.getElementById('app');
+  var app = document.getElementById('app');
   if (workouts.length === 0) {
     app.innerHTML = '<div class="no-data">No workouts yet.</div>';
     return;
   }
 
-  let html = '<div class="workout-list">';
+  var html = '<div class="workout-list">';
   workouts.forEach(function(w, i) {
-    const type = WORKOUT_ICONS[w.workout_type] || w.workout_type;
-    const dur = w.duration ? toHM(sv(w.duration) * 60) : '';
-    const cal = w.calories ? Math.round(sv(w.calories)) + ' kcal' : '';
-    const dist = w.distance ? (sv(w.distance) / 1000).toFixed(1) + ' km' : '';
-    const rightParts = [dur, dist, cal].filter(Boolean);
+    var type = TYPE_NAMES[w.workout_type] || w.workout_type;
+    var dur = w.duration ? toHM(sv(w.duration) * 60) : '';
+    var cal = w.calories ? Math.round(sv(w.calories)) + ' kcal' : '';
+    var dist = w.distance ? (sv(w.distance) / 1000).toFixed(1) + ' km' : '';
+    var parts = [dur, dist, cal].filter(Boolean);
     html += '<div class="workout-item" data-idx="' + i + '">'
       + '<div class="wi-left"><span class="wi-type">' + type + '</span>'
       + '<span class="wi-date">' + fmtDate(w.start) + ' ' + fmtTime(w.start) + '</span></div>'
-      + '<div class="wi-right">' + rightParts.join(' &middot; ') + '</div>'
+      + '<div class="wi-right">' + parts.join(' &middot; ') + '</div>'
       + '</div>';
   });
   html += '</div>';
@@ -127,111 +201,172 @@ async function load() {
 }
 
 function showDetail(idx) {
-  const w = workouts[idx];
-  const detail = document.getElementById('detail');
+  var w = workouts[idx];
+  var detail = document.getElementById('detail');
   detail.style.display = 'block';
 
-  const type = WORKOUT_ICONS[w.workout_type] || w.workout_type;
-  const startTime = fmtTime(w.start);
-  const endTime = fmtTime(w.end);
-  const durSec = (new Date(w.end) - new Date(w.start)) / 1000;
+  var type = TYPE_NAMES[w.workout_type] || w.workout_type;
+  var durSec = (new Date(w.end) - new Date(w.start)) / 1000;
+  var durVal = w.duration ? sv(w.duration) * 60 : durSec;
 
-  let html = '<div class="card"><h3>' + type + ' &mdash; ' + fmtDate(w.start) + ', ' + startTime + ' - ' + endTime + '</h3>';
+  var hasHR = w.heart_rate && w.heart_rate.samples && w.heart_rate.samples.length > 0;
+  var hasRoute = w.route && w.route.length > 1;
+  var ra = hasRoute ? analyzeRoute(w.route) : null;
+
+  var html = '<div class="card"><h3>' + type + ' &mdash; ' + fmtDate(w.start) + ', ' + fmtTime(w.start) + ' - ' + fmtTime(w.end) + '</h3>';
   html += '<div class="metrics">';
 
-  const stats = [];
-  stats.push(['Duration', toHM(w.duration ? sv(w.duration) * 60 : durSec)]);
-  if (w.calories) stats.push(['Calories', Math.round(sv(w.calories)) + ' kcal']);
-  if (w.distance) {
-    const km = sv(w.distance) / 1000;
-    stats.push(['Distance', km.toFixed(2) + ' km']);
-    if (durSec > 0) {
-      const pace = durSec / km / 60;
-      stats.push(['Pace', Math.floor(pace) + ':' + String(Math.round((pace % 1) * 60)).padStart(2, '0') + ' /km']);
-    }
+  html += m('Duration', toHMS(durVal));
+  if (ra) html += m('Distance', (ra.totalDist / 1000).toFixed(2) + ' km');
+  else if (w.distance) html += m('Distance', (sv(w.distance) / 1000).toFixed(2) + ' km');
+  if (ra && ra.totalDist > 0 && durVal > 0) {
+    html += m('Avg Pace', fmtPace(durVal / (ra.totalDist / 1000)) + ' /km');
+    html += m('Avg Speed', ((ra.totalDist / 1000) / (durVal / 3600)).toFixed(1) + ' km/h');
   }
-  if (w.average_heart_rate) stats.push(['Avg HR', Math.round(sv(w.average_heart_rate)) + ' bpm']);
-  if (w.max_heart_rate) stats.push(['Max HR', Math.round(sv(w.max_heart_rate)) + ' bpm']);
+  if (w.calories) html += m('Calories', Math.round(sv(w.calories)) + ' kcal');
+  if (w.average_heart_rate) html += m('Avg HR', Math.round(sv(w.average_heart_rate)) + ' bpm');
+  if (w.max_heart_rate) html += m('Max HR', Math.round(sv(w.max_heart_rate)) + ' bpm');
+  if (ra && ra.elevGain > 0) html += m('Elev Gain', Math.round(ra.elevGain) + ' m');
+  if (ra && ra.elevLoss > 0) html += m('Elev Loss', Math.round(ra.elevLoss) + ' m');
+  if (ra && ra.elevations.length > 0) {
+    html += m('Min Elev', Math.round(Math.min.apply(null, ra.elevations)) + ' m');
+    html += m('Max Elev', Math.round(Math.max.apply(null, ra.elevations)) + ' m');
+  }
 
-  stats.forEach(function(s) {
-    html += '<div class="metric"><div class="val">' + s[1] + '</div><div class="lbl">' + s[0] + '</div></div>';
-  });
   html += '</div></div>';
 
-  const hasHR = w.heart_rate && w.heart_rate.samples && w.heart_rate.samples.length > 0;
-  const hasRoute = w.route && w.route.length > 0;
-
-  if (hasHR || hasRoute) {
+  if (hasRoute) {
     html += '<div class="detail-grid">';
-    if (hasHR) html += '<div class="card"><h3>Heart Rate</h3><div id="hr-chart"></div></div>';
-    if (hasRoute) html += '<div class="card"><h3>Route</h3><div id="map"></div></div>';
+    html += '<div class="card"><h3>Route</h3><div id="map"></div></div>';
+    if (ra.elevations.length > 1) {
+      html += '<div class="card"><h3>Elevation</h3><div id="elev-chart"></div></div>';
+    }
     html += '</div>';
+  }
+
+  if (hasHR) {
+    html += '<div class="card detail-full"><h3>Heart Rate</h3><div id="hr-chart"></div></div>';
+  }
+
+  if (ra && ra.splits.length > 0) {
+    var fastestPace = Math.min.apply(null, ra.splits.map(function(s) { return s.pace; }));
+    var slowestPace = Math.max.apply(null, ra.splits.map(function(s) { return s.pace; }));
+    html += '<div class="card"><h3>Splits</h3>';
+    html += '<table class="splits-table"><thead><tr><th>KM</th><th>Pace</th><th>Elev</th><th></th></tr></thead><tbody>';
+    ra.splits.forEach(function(s) {
+      var pct = slowestPace > fastestPace ? 100 - ((s.pace - fastestPace) / (slowestPace - fastestPace) * 60) : 100;
+      var barColor = s.pace <= fastestPace * 1.05 ? C.emerald : s.pace >= slowestPace * 0.95 ? C.rose : C.indigo;
+      var elevStr = s.elev != null ? (s.elev >= 0 ? '+' : '') + Math.round(s.elev) + ' m' : '--';
+      html += '<tr><td>' + s.km + '</td><td>' + fmtPace(s.pace) + ' /km</td><td>' + elevStr + '</td>'
+        + '<td style="width:40%"><div class="pace-bar" style="width:' + pct + '%;background:' + barColor + '"></div></td></tr>';
+    });
+    html += '</tbody></table></div>';
   }
 
   detail.innerHTML = html;
 
-  if (hasHR) renderHR(w.heart_rate.samples);
   if (hasRoute) renderMap(w.route);
+  if (ra && ra.elevations.length > 1) renderElevation(ra);
+  if (hasHR) renderHR(w.heart_rate.samples);
+}
+
+function m(label, val) {
+  return '<div class="metric"><div class="val">' + val + '</div><div class="lbl">' + label + '</div></div>';
 }
 
 function renderHR(samples) {
-  const container = document.getElementById('hr-chart');
-  const width = container.clientWidth - 8;
+  var container = document.getElementById('hr-chart');
+  if (!container) return;
+  var width = container.clientWidth - 8;
 
-  const ts = new Float64Array(samples.length);
-  const vals = new Float64Array(samples.length);
-  for (let i = 0; i < samples.length; i++) {
+  var ts = new Float64Array(samples.length);
+  var vals = new Float64Array(samples.length);
+  for (var i = 0; i < samples.length; i++) {
     ts[i] = new Date(samples[i].timestamp).getTime() / 1000;
     vals[i] = samples[i].value;
   }
 
-  const yMin = Math.floor((Math.min(...vals) - 5) / 10) * 10;
-  const yMax = Math.ceil((Math.max(...vals) + 5) / 10) * 10;
+  var yMin = Math.floor((Math.min.apply(null, vals) - 5) / 10) * 10;
+  var yMax = Math.ceil((Math.max.apply(null, vals) + 5) / 10) * 10;
 
   new uPlot({
-    width: width, height: 220, pxAlign: 0,
-    cursor: { drag: { x: false, y: false } },
+    width: width, height: 250, pxAlign: 0,
+    cursor: { drag: { x: true, y: false } },
+    select: { over: false },
     legend: { show: false },
     scales: {
-      y: { range: [yMin, yMax] },
+      y: { auto: false, range: [yMin, yMax] },
     },
     axes: [
       { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
         values: function(u, vs) {
           return vs.map(function(v) {
-            var d = new Date(v * 1000);
-            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
+            return new Date(v * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
           });
         }
       },
       { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
         incrs: [10],
+        values: function(u, vs) { return vs.map(function(v) { return v + ''; }); }
       },
     ],
     series: [ {},
-      { stroke: ROSE, width: 1.5, fill: 'rgba(244,63,94,0.08)', points: { show: false } },
+      { stroke: C.rose, width: 1.5, fill: 'rgba(244,63,94,0.08)', points: { show: false }, label: 'bpm' },
     ],
   }, [ts, vals], container);
 }
 
+function renderElevation(ra) {
+  var container = document.getElementById('elev-chart');
+  if (!container) return;
+  var width = container.clientWidth - 8;
+
+  var distKm = new Float64Array(ra.distances.length);
+  var elev = new Float64Array(ra.elevations.length);
+  var len = Math.min(ra.distances.length, ra.elevations.length);
+  for (var i = 0; i < len; i++) {
+    distKm[i] = ra.distances[i] / 1000;
+    elev[i] = ra.elevations[i];
+  }
+
+  var eMin = Math.floor(Math.min.apply(null, elev) / 10) * 10 - 10;
+  var eMax = Math.ceil(Math.max.apply(null, elev) / 10) * 10 + 10;
+
+  new uPlot({
+    width: width, height: 200, pxAlign: 0,
+    cursor: { drag: { x: false, y: false } },
+    legend: { show: false },
+    scales: {
+      x: { auto: true },
+      y: { auto: false, range: [eMin, eMax] },
+    },
+    axes: [
+      { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
+        values: function(u, vs) { return vs.map(function(v) { return v.toFixed(1) + ' km'; }); }
+      },
+      { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
+        values: function(u, vs) { return vs.map(function(v) { return Math.round(v) + ' m'; }); }
+      },
+    ],
+    series: [ {},
+      { stroke: C.emerald, width: 1.5, fill: 'rgba(16,185,129,0.12)', points: { show: false }, label: 'Elevation' },
+    ],
+  }, [distKm.slice(0, len), elev], container);
+}
+
 function renderMap(route) {
   if (map) { map.remove(); map = null; }
-
-  const mapEl = document.getElementById('map');
+  var mapEl = document.getElementById('map');
   if (!mapEl) return;
 
   map = L.map('map', { attributionControl: false, zoomControl: true });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19,
-  }).addTo(map);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
 
-  const coords = route.map(function(p) { return [p.lat, p.lon]; });
-  routeLayer = L.polyline(coords, { color: '#6366f1', weight: 3, opacity: 0.9 }).addTo(map);
-
-  L.circleMarker(coords[0], { radius: 6, color: '#10b981', fillColor: '#10b981', fillOpacity: 1 }).addTo(map);
-  L.circleMarker(coords[coords.length - 1], { radius: 6, color: '#f43f5e', fillColor: '#f43f5e', fillOpacity: 1 }).addTo(map);
-
-  map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
+  var coords = route.map(function(p) { return [p.lat, p.lon]; });
+  var line = L.polyline(coords, { color: C.indigo, weight: 3, opacity: 0.9 }).addTo(map);
+  L.circleMarker(coords[0], { radius: 6, color: C.emerald, fillColor: C.emerald, fillOpacity: 1 }).addTo(map);
+  L.circleMarker(coords[coords.length - 1], { radius: 6, color: C.rose, fillColor: C.rose, fillOpacity: 1 }).addTo(map);
+  map.fitBounds(line.getBounds(), { padding: [30, 30] });
 }
 
 load();
