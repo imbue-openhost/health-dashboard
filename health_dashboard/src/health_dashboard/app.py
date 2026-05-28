@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 
@@ -8,12 +9,17 @@ from litestar.response import Response
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
+SERVICE_URL = "github.com/imbue-openhost/health-data-service-spec"
+
 _http_client: httpx.AsyncClient | None = None
 
 
+def _router_url() -> str:
+    return os.environ.get("OPENHOST_ROUTER_URL", "").rstrip("/")
+
+
 def _service_base_url() -> str:
-    router_url = os.environ.get("OPENHOST_ROUTER_URL", "").rstrip("/")
-    return f"{router_url}/api/services/v2/call/health"
+    return f"{_router_url()}/api/services/v2/call/health"
 
 
 def _auth_headers() -> dict[str, str]:
@@ -21,10 +27,46 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _service_get(path: str, params: dict | None = None) -> httpx.Response:
+async def _discover_providers() -> list[dict]:
     assert _http_client is not None
-    url = f"{_service_base_url()}{path}"
-    return await _http_client.get(url, params=params, headers=_auth_headers())
+    try:
+        resp = await _http_client.get(
+            f"{_router_url()}/api/services/v2/providers",
+            params={"service": SERVICE_URL},
+            headers=_auth_headers(),
+        )
+        if resp.status_code == 200:
+            return resp.json().get("providers", [])
+    except Exception:
+        log.exception("Provider discovery failed")
+    return []
+
+
+async def _fan_out_get(path: str, params: dict | None = None) -> list[dict]:
+    """Call all running providers in parallel, return list of parsed JSON responses."""
+    assert _http_client is not None
+    providers = await _discover_providers()
+    running = [p for p in providers if p.get("status") == "running"]
+
+    if not running:
+        url = f"{_service_base_url()}{path}"
+        resp = await _http_client.get(url, params=params, headers=_auth_headers())
+        return [resp.json()] if resp.status_code == 200 else []
+
+    async def _call(provider: dict) -> dict | None:
+        headers = {**_auth_headers(), "X-OpenHost-Provider": provider["app_id"]}
+        try:
+            resp = await _http_client.get(
+                f"{_service_base_url()}{path}", params=params, headers=headers,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception:
+            log.warning("Service call to %s failed", provider.get("app_name"))
+        return None
+
+    results = await asyncio.gather(*[_call(p) for p in running])
+    return [r for r in results if r is not None]
 
 
 # ---------------------------------------------------------------------------
@@ -46,31 +88,56 @@ async def index() -> Response:
 
 
 # ---------------------------------------------------------------------------
-# API proxy — forwards requests to the health-data service
+# API — fans out to all health-data providers and merges results
 # ---------------------------------------------------------------------------
 
 @get("/api/metrics")
-async def proxy_metrics() -> Response:
-    resp = await _service_get("/v1/metrics")
-    return Response(content=resp.text, media_type="application/json", status_code=resp.status_code)
+async def proxy_metrics() -> dict:
+    results = await _fan_out_get("/v1/metrics")
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for r in results:
+        for m in r.get("metrics", []):
+            mid = m.get("metric_id")
+            if mid and mid not in seen:
+                seen.add(mid)
+                merged.append(m)
+    return {"metrics": merged}
 
 
 @get("/api/sleep-sessions")
-async def proxy_sleep_sessions(request: Request) -> Response:
-    resp = await _service_get("/v1/sleep-sessions", dict(request.query_params))
-    return Response(content=resp.text, media_type="application/json", status_code=resp.status_code)
+async def proxy_sleep_sessions(request: Request) -> dict:
+    results = await _fan_out_get("/v1/sleep-sessions", dict(request.query_params))
+    all_sessions: list[dict] = []
+    for r in results:
+        all_sessions.extend(r.get("data", []))
+    all_sessions.sort(key=lambda s: s.get("start", ""), reverse=True)
+    limit = int(request.query_params.get("limit", "100"))
+    return {"data": all_sessions[:limit]}
 
 
 @get("/api/time-series")
-async def proxy_time_series(request: Request) -> Response:
-    resp = await _service_get("/v1/time-series", dict(request.query_params))
-    return Response(content=resp.text, media_type="application/json", status_code=resp.status_code)
+async def proxy_time_series(request: Request) -> dict:
+    results = await _fan_out_get("/v1/time-series", dict(request.query_params))
+    if not results:
+        return {"metric_id": request.query_params.get("metric", ""), "samples": []}
+    merged = dict(results[0])
+    all_samples: list[dict] = []
+    for r in results:
+        all_samples.extend(r.get("samples", []))
+    all_samples.sort(key=lambda s: s.get("timestamp", ""))
+    merged["samples"] = all_samples
+    return merged
 
 
 @get("/api/workouts")
-async def proxy_workouts(request: Request) -> Response:
-    resp = await _service_get("/v1/workouts", dict(request.query_params))
-    return Response(content=resp.text, media_type="application/json", status_code=resp.status_code)
+async def proxy_workouts(request: Request) -> dict:
+    results = await _fan_out_get("/v1/workouts", dict(request.query_params))
+    all_workouts: list[dict] = []
+    for r in results:
+        all_workouts.extend(r.get("data", []))
+    all_workouts.sort(key=lambda s: s.get("start", ""), reverse=True)
+    return {"data": all_workouts}
 
 
 # ---------------------------------------------------------------------------
