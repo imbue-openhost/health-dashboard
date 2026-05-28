@@ -229,31 +229,32 @@ DASHBOARD_HTML = """\
   }
   .nav-curtain {
     position: absolute; top: 0; height: 100%;
-    background: rgba(15,23,42,0.55); pointer-events: all; cursor: pointer;
+    background: rgba(0,0,0,0.45); pointer-events: all; cursor: pointer;
   }
   .nav-curtain-l { left: 0; }
   .nav-curtain-r { right: 0; }
   .nav-sel {
     position: absolute; top: 0; height: 100%;
     pointer-events: all; cursor: grab;
-    border-left: 1px solid rgba(148,163,184,0.4);
-    border-right: 1px solid rgba(148,163,184,0.4);
+    background: rgba(99,102,241,0.08);
+    border-left: 2px solid rgba(148,163,184,0.5);
+    border-right: 2px solid rgba(148,163,184,0.5);
   }
   .nav-sel:active { cursor: grabbing; }
   .nav-handle {
-    position: absolute; top: 50%; transform: translateY(-50%);
-    width: 14px; height: 28px;
-    background: #475569; border: 1px solid #64748b; border-radius: 3px;
+    position: absolute; top: 0;
+    width: 10px; height: 100%;
+    background: rgba(100,116,139,0.7); border-radius: 2px;
     cursor: ew-resize; pointer-events: all;
     display: flex; align-items: center; justify-content: center;
   }
   .nav-handle::after {
     content: ''; display: block;
-    width: 4px; height: 10px;
-    border-left: 1px solid #94a3b8; border-right: 1px solid #94a3b8;
+    width: 4px; height: 12px;
+    border-left: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1;
   }
-  .nav-handle-l { left: -7px; }
-  .nav-handle-r { right: -7px; }
+  .nav-handle-l { left: -5px; }
+  .nav-handle-r { right: -5px; }
 </style>
 </head>
 <body>
@@ -741,12 +742,21 @@ async function loadDashboard() {
 
     // --- Custom overlay for navigator selection ---
     navReadyPromise.then(function() {
+      // Position overlay relative to #hr-nav-wrap using actual rendered bounds
+      var navContainer = document.getElementById('hr-nav-wrap');
       var over = uNav.root.querySelector('.u-over');
-      over.style.position = 'relative';
-      over.style.overflow = 'visible';
+      var containerRect = navContainer.getBoundingClientRect();
+      var overRect = over.getBoundingClientRect();
+      var plotL = overRect.left - containerRect.left;
+      var plotT = overRect.top - containerRect.top;
+      var plotW = over.clientWidth;
+      var plotH = over.clientHeight;
 
       var overlay = document.createElement('div');
-      overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
+      overlay.className = 'nav-overlay';
+      overlay.style.cssText = 'position:absolute;pointer-events:none;z-index:100;'
+        + 'left:' + plotL + 'px;top:' + plotT + 'px;'
+        + 'width:' + plotW + 'px;height:' + plotH + 'px;overflow:visible;';
 
       var curtainL = document.createElement('div');
       curtainL.className = 'nav-curtain nav-curtain-l';
@@ -764,17 +774,16 @@ async function loadDashboard() {
       overlay.appendChild(curtainL);
       overlay.appendChild(sel);
       overlay.appendChild(curtainR);
-      over.appendChild(overlay);
+      navContainer.appendChild(overlay);
 
       function positionOverlay() {
-        var maxW = over.clientWidth;
-        var l = Math.max(0, Math.min(selLeft, maxW));
-        var w = Math.max(20, Math.min(selWidth, maxW - l));
+        var l = Math.max(0, Math.min(selLeft, plotW));
+        var w = Math.max(20, Math.min(selWidth, plotW - l));
         curtainL.style.width = l + 'px';
         sel.style.left = l + 'px';
         sel.style.width = w + 'px';
         curtainR.style.left = (l + w) + 'px';
-        curtainR.style.width = (maxW - l - w) + 'px';
+        curtainR.style.width = (plotW - l - w) + 'px';
       }
 
       // Initial selection: last 3 hours
@@ -783,76 +792,64 @@ async function loadDashboard() {
       positionOverlay();
       selToScale();
 
-    // --- Drag interaction ---
-    function startDrag(e, mode) {
-      e.preventDefault();
-      e.stopPropagation();
-      var startX = e.clientX;
-      var origL = selLeft, origW = selWidth;
+      // --- Drag interaction ---
+      function startDrag(e, mode) {
+        e.preventDefault();
+        e.stopPropagation();
+        var startX = e.clientX;
+        var origL = selLeft, origW = selWidth;
 
-      function onMove(e) {
-        var dx = e.clientX - startX;
-        var maxW = over.clientWidth;
-        if (mode === 'pan') {
-          var nl = origL + dx;
-          if (nl < 0) nl = 0;
-          if (nl + origW > maxW) nl = maxW - origW;
-          selLeft = nl; selWidth = origW;
-        } else if (mode === 'left') {
-          var nl = origL + dx;
-          var nr = origL + origW;
-          if (nl < 0) nl = 0;
-          if (nl > nr - 10) nl = nr - 10;
-          selLeft = nl; selWidth = nr - nl;
-        } else if (mode === 'right') {
-          var nw = origW + dx;
-          if (nw < 10) nw = 10;
-          if (origL + nw > maxW) nw = maxW - origL;
-          selLeft = origL; selWidth = nw;
+        function onMove(e) {
+          var dx = e.clientX - startX;
+          if (mode === 'pan') {
+            var nl = origL + dx;
+            if (nl < 0) nl = 0;
+            if (nl + origW > plotW) nl = plotW - origW;
+            selLeft = nl; selWidth = origW;
+          } else if (mode === 'left') {
+            var nl = origL + dx;
+            var nr = origL + origW;
+            if (nl < 0) nl = 0;
+            if (nl > nr - 20) nl = nr - 20;
+            selLeft = nl; selWidth = nr - nl;
+          } else if (mode === 'right') {
+            var nw = origW + dx;
+            if (nw < 20) nw = 20;
+            if (origL + nw > plotW) nw = plotW - origL;
+            selLeft = origL; selWidth = nw;
+          }
+          positionOverlay();
+          selToScale();
         }
+
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      }
+
+      sel.addEventListener('mousedown', function(e) {
+        if (e.target === handleL || e.target === handleR) return;
+        startDrag(e, 'pan');
+      });
+      handleL.addEventListener('mousedown', function(e) { startDrag(e, 'left'); });
+      handleR.addEventListener('mousedown', function(e) { startDrag(e, 'right'); });
+
+      function curtainJump(e) {
+        var rect = overlay.getBoundingClientRect();
+        var clickX = e.clientX - rect.left;
+        var newL = clickX - selWidth / 2;
+        if (newL < 0) newL = 0;
+        if (newL + selWidth > plotW) newL = plotW - selWidth;
+        selLeft = newL;
         positionOverlay();
         selToScale();
+        startDrag(e, 'pan');
       }
-
-      function onUp() {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      }
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    }
-
-    sel.addEventListener('mousedown', function(e) {
-      if (e.target === handleL || e.target === handleR) return;
-      startDrag(e, 'pan');
-    });
-    handleL.addEventListener('mousedown', function(e) { startDrag(e, 'left'); });
-    handleR.addEventListener('mousedown', function(e) { startDrag(e, 'right'); });
-
-    curtainL.addEventListener('mousedown', function(e) {
-      var rect = over.getBoundingClientRect();
-      var clickX = e.clientX - rect.left;
-      var newL = clickX - selWidth / 2;
-      var maxW = over.clientWidth;
-      if (newL < 0) newL = 0;
-      if (newL + selWidth > maxW) newL = maxW - selWidth;
-      selLeft = newL;
-      positionOverlay();
-      selToScale();
-      startDrag(e, 'pan');
-    });
-    curtainR.addEventListener('mousedown', function(e) {
-      var rect = over.getBoundingClientRect();
-      var clickX = e.clientX - rect.left;
-      var newL = clickX - selWidth / 2;
-      var maxW = over.clientWidth;
-      if (newL < 0) newL = 0;
-      if (newL + selWidth > maxW) newL = maxW - selWidth;
-      selLeft = newL;
-      positionOverlay();
-      selToScale();
-      startDrag(e, 'pan');
-    });
+      curtainL.addEventListener('mousedown', curtainJump);
+      curtainR.addEventListener('mousedown', curtainJump);
 
       // Wire up scaleToSel for main chart zoom -> nav sync
       scaleToSel = function() {

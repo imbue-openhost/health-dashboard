@@ -12,28 +12,24 @@ def test_heart_rate_chart_renders(stack):
         page.wait_for_selector("#hr-main-wrap canvas", timeout=20000)
         page.wait_for_timeout(2000)
 
-        # Debug: check overlay state
         debug = page.evaluate("""() => {
-            const over = document.querySelector('#hr-nav-wrap .u-over');
-            if (!over) return {error: 'no .u-over'};
-            const cs = getComputedStyle(over);
-            const children = over.children.length;
-            const sel = over.querySelector('.nav-sel');
-            const cL = over.querySelector('.nav-curtain-l');
-            const hL = over.querySelector('.nav-handle-l');
+            const wrap = document.getElementById('hr-nav-wrap');
+            const overlay = wrap ? wrap.querySelector('.nav-overlay') : null;
+            const sel = overlay ? overlay.querySelector('.nav-sel') : null;
+            const hL = overlay ? overlay.querySelector('.nav-handle-l') : null;
+            const hR = overlay ? overlay.querySelector('.nav-handle-r') : null;
+            const cL = overlay ? overlay.querySelector('.nav-curtain-l') : null;
             return {
-                overDims: {w: over.clientWidth, h: over.clientHeight},
-                overPos: cs.position, overOverflow: cs.overflow,
-                childCount: children,
-                selExists: !!sel,
-                selDims: sel ? {l: sel.style.left, w: sel.style.width, h: getComputedStyle(sel).height} : null,
-                curtainExists: !!cL,
-                curtainDims: cL ? {w: cL.style.width, h: getComputedStyle(cL).height} : null,
-                handleExists: !!hL,
-                handleDims: hL ? {w: getComputedStyle(hL).width, h: getComputedStyle(hL).height, pos: getComputedStyle(hL).position} : null,
+                wrapExists: !!wrap,
+                overlayExists: !!overlay,
+                overlayStyle: overlay ? overlay.style.cssText : null,
+                selStyle: sel ? sel.style.cssText : null,
+                selComputed: sel ? {l: getComputedStyle(sel).left, w: getComputedStyle(sel).width, h: getComputedStyle(sel).height} : null,
+                handleLExists: !!hL, handleRExists: !!hR,
+                curtainLWidth: cL ? getComputedStyle(cL).width : null,
             };
         }""")
-        print(f"\nOverlay debug: {debug}")
+        print(f"\\nOverlay debug: {debug}")
 
         page.screenshot(path=SCREENSHOT_PATH, full_page=False)
         browser.close()
