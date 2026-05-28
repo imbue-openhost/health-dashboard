@@ -532,13 +532,13 @@ async function loadDashboard() {
         x: { min: t3h, max: nowSec },
         y: { auto: true, range: function(u, dMin, dMax) {
           if (dMin == null) return [40, 120];
-          var pad = (dMax - dMin) * 0.1 || 5;
-          return [Math.floor(dMin - pad), Math.ceil(dMax + pad)];
+          return [Math.floor((dMin - 5) / 10) * 10, Math.ceil((dMax + 5) / 10) * 10];
         }},
       },
       axes: [
         { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui' },
-        { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui',
+        { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '11px system-ui',
+          incrs: [10],
           values: function(u, vs) { return vs.map(function(v) { return v + ''; }); } },
       ],
       series: [ {},
