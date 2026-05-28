@@ -686,12 +686,8 @@ async function loadDashboard() {
       uMain.setScale('x', { min: min, max: max });
     }
 
-    function scaleToSel() {
-      selLeft = Math.round(uNav.valToPos(uMain.scales.x.min, 'x'));
-      var r = Math.round(uNav.valToPos(uMain.scales.x.max, 'x'));
-      selWidth = r - selLeft;
-      positionOverlay();
-    }
+    // Becomes real after nav overlay is ready
+    var scaleToSel = function() {};
 
     // --- Main chart ---
     uMain = new uPlot({
@@ -721,8 +717,11 @@ async function loadDashboard() {
     }, data, mainWrap);
 
     // --- Navigator chart ---
+    var navReady;
+    var navReadyPromise = new Promise(function(resolve) { navReady = resolve; });
+
     uNav = new uPlot({
-      width: width, height: 60, pxAlign: 0,
+      width: width, height: 100, pxAlign: 0,
       cursor: { show: false, drag: { x: false, y: false } },
       legend: { show: false },
       scales: {
@@ -730,56 +729,59 @@ async function loadDashboard() {
         y: { auto: true },
       },
       axes: [
-        { stroke: '#64748b', grid: { show: false }, ticks: { stroke: '#334155' }, font: '10px system-ui' },
+        { stroke: '#64748b', grid: { show: false }, ticks: { stroke: '#334155' }, font: '10px system-ui', size: 28 },
         { show: false },
       ],
       series: [ {},
         { stroke: ROSE, width: 1, fill: 'rgba(244,63,94,0.04)',
           spanGaps: false, points: { show: false } },
       ],
+      hooks: { ready: [ function() { navReady(); } ] },
     }, data, navWrap);
 
     // --- Custom overlay for navigator selection ---
-    var over = uNav.root.querySelector('.u-over');
-    over.style.position = 'relative';
-    over.style.overflow = 'visible';
+    navReadyPromise.then(function() {
+      var over = uNav.root.querySelector('.u-over');
+      over.style.position = 'relative';
+      over.style.overflow = 'visible';
 
-    var overlay = document.createElement('div');
-    overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
 
-    var curtainL = document.createElement('div');
-    curtainL.className = 'nav-curtain nav-curtain-l';
-    var curtainR = document.createElement('div');
-    curtainR.className = 'nav-curtain nav-curtain-r';
-    var sel = document.createElement('div');
-    sel.className = 'nav-sel';
-    var handleL = document.createElement('div');
-    handleL.className = 'nav-handle nav-handle-l';
-    var handleR = document.createElement('div');
-    handleR.className = 'nav-handle nav-handle-r';
+      var curtainL = document.createElement('div');
+      curtainL.className = 'nav-curtain nav-curtain-l';
+      var curtainR = document.createElement('div');
+      curtainR.className = 'nav-curtain nav-curtain-r';
+      var sel = document.createElement('div');
+      sel.className = 'nav-sel';
+      var handleL = document.createElement('div');
+      handleL.className = 'nav-handle nav-handle-l';
+      var handleR = document.createElement('div');
+      handleR.className = 'nav-handle nav-handle-r';
 
-    sel.appendChild(handleL);
-    sel.appendChild(handleR);
-    overlay.appendChild(curtainL);
-    overlay.appendChild(sel);
-    overlay.appendChild(curtainR);
-    over.appendChild(overlay);
+      sel.appendChild(handleL);
+      sel.appendChild(handleR);
+      overlay.appendChild(curtainL);
+      overlay.appendChild(sel);
+      overlay.appendChild(curtainR);
+      over.appendChild(overlay);
 
-    function positionOverlay() {
-      var maxW = over.clientWidth;
-      var l = Math.max(0, Math.min(selLeft, maxW));
-      var w = Math.max(0, Math.min(selWidth, maxW - l));
-      curtainL.style.width = l + 'px';
-      sel.style.left = l + 'px';
-      sel.style.width = w + 'px';
-      curtainR.style.left = (l + w) + 'px';
-      curtainR.style.width = (maxW - l - w) + 'px';
-    }
+      function positionOverlay() {
+        var maxW = over.clientWidth;
+        var l = Math.max(0, Math.min(selLeft, maxW));
+        var w = Math.max(20, Math.min(selWidth, maxW - l));
+        curtainL.style.width = l + 'px';
+        sel.style.left = l + 'px';
+        sel.style.width = w + 'px';
+        curtainR.style.left = (l + w) + 'px';
+        curtainR.style.width = (maxW - l - w) + 'px';
+      }
 
-    // Initial selection: last 3 hours
-    selLeft = Math.round(uNav.valToPos(t3h, 'x'));
-    selWidth = Math.round(uNav.valToPos(nowSec, 'x')) - selLeft;
-    positionOverlay();
+      // Initial selection: last 3 hours
+      selLeft = Math.round(uNav.valToPos(t3h, 'x'));
+      selWidth = Math.round(uNav.valToPos(nowSec, 'x')) - selLeft;
+      positionOverlay();
+      selToScale();
 
     // --- Drag interaction ---
     function startDrag(e, mode) {
@@ -851,6 +853,15 @@ async function loadDashboard() {
       selToScale();
       startDrag(e, 'pan');
     });
+
+      // Wire up scaleToSel for main chart zoom -> nav sync
+      scaleToSel = function() {
+        selLeft = Math.round(uNav.valToPos(uMain.scales.x.min, 'x'));
+        var r = Math.round(uNav.valToPos(uMain.scales.x.max, 'x'));
+        selWidth = r - selLeft;
+        positionOverlay();
+      };
+    }); // end navReadyPromise.then
   }
 })();
 
