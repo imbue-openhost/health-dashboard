@@ -641,11 +641,12 @@ async function loadDashboard() {
 
 // ---- Heart Rate Explorer (uPlot + custom navigator) ----
 (function() {
-  const ROSE = '#f43f5e';
-  const nowSec = Date.now() / 1000;
-  const t24h = nowSec - 24 * 3600;
-  const t3h  = nowSec - 3 * 3600;
-  const startISO = new Date(t24h * 1000).toISOString();
+  var ROSE = '#f43f5e';
+  var GAP_THRESHOLD = 600; // 10 min — treat gaps larger than this as missing data
+  var nowSec = Math.floor(Date.now() / 1000);
+  var t24h = nowSec - 24 * 3600;
+  var t3h  = nowSec - 3 * 3600;
+  var startISO = new Date(t24h * 1000).toISOString();
 
   fetch('/api/time-series?metric=heart_rate&start=' + startISO)
     .then(function(r) { return r.json(); })
@@ -658,23 +659,26 @@ async function loadDashboard() {
       return;
     }
 
-    const ts = new Float64Array(samples.length);
-    const vals = new Float64Array(samples.length);
+    // Build arrays with nulls inserted at gaps so the line breaks
+    var rawTs = [], rawVals = [];
     for (var i = 0; i < samples.length; i++) {
-      ts[i] = new Date(samples[i].timestamp).getTime() / 1000;
-      vals[i] = samples[i].value;
+      var t = new Date(samples[i].timestamp).getTime() / 1000;
+      if (i > 0 && t - rawTs[rawTs.length - 1] > GAP_THRESHOLD) {
+        // Insert a null point midway through the gap to break the line
+        rawTs.push((rawTs[rawTs.length - 1] + t) / 2);
+        rawVals.push(null);
+      }
+      rawTs.push(t);
+      rawVals.push(samples[i].value);
     }
-    var data = [ts, vals];
+    var data = [rawTs, rawVals];
 
     var mainWrap = document.getElementById('hr-main-wrap');
     var navWrap = document.getElementById('hr-nav-wrap');
     var width = mainWrap.clientWidth - 16;
 
     var uMain, uNav;
-
-    // State for the navigator selection (in pixels relative to nav plot area)
     var selLeft = 0, selWidth = 0;
-    var navPlotLeft = 0, navPlotWidth = 0;
 
     function selToScale() {
       var min = uNav.posToVal(selLeft, 'x');
@@ -690,44 +694,58 @@ async function loadDashboard() {
     }
 
     // --- Main chart ---
-    var mainOpts = {
+    uMain = new uPlot({
       width: width, height: 300, pxAlign: 0,
       cursor: { drag: { x: true, y: false } },
       select: { over: false },
-      scales: { x: { min: t3h, max: nowSec }, y: { auto: true } },
+      legend: { show: false },
+      scales: {
+        x: { min: t3h, max: nowSec },
+        y: { auto: true, range: function(u, dMin, dMax) {
+          if (dMin == null) return [40, 120];
+          var pad = (dMax - dMin) * 0.1 || 5;
+          return [Math.floor(dMin - pad), Math.ceil(dMax + pad)];
+        }},
+      },
       axes: [
         { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui' },
         { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '11px system-ui',
           values: function(u, vs) { return vs.map(function(v) { return v + ''; }); } },
       ],
-      series: [ {}, { stroke: ROSE, width: 1.5, fill: 'rgba(244,63,94,0.06)', label: 'bpm' } ],
+      series: [ {},
+        { stroke: ROSE, width: 1.5, fill: 'rgba(244,63,94,0.06)',
+          spanGaps: false, label: 'bpm',
+          points: { show: false } },
+      ],
       hooks: { setScale: [ function() { if (uNav) scaleToSel(); } ] },
-    };
-    uMain = new uPlot(mainOpts, data, mainWrap);
+    }, data, mainWrap);
 
-    // --- Navigator chart (no cursor/selection - fully custom) ---
-    var navOpts = {
+    // --- Navigator chart ---
+    uNav = new uPlot({
       width: width, height: 60, pxAlign: 0,
-      cursor: { show: false },
-      select: { show: false },
+      cursor: { show: false, drag: { x: false, y: false } },
       legend: { show: false },
-      scales: { y: { auto: true } },
+      scales: {
+        x: { min: t24h, max: nowSec },
+        y: { auto: true },
+      },
       axes: [
         { stroke: '#64748b', grid: { show: false }, ticks: { stroke: '#334155' }, font: '10px system-ui' },
         { show: false },
       ],
-      series: [ {}, { stroke: ROSE, width: 1, fill: 'rgba(244,63,94,0.04)' } ],
-    };
-    uNav = new uPlot(navOpts, data, navWrap);
+      series: [ {},
+        { stroke: ROSE, width: 1, fill: 'rgba(244,63,94,0.04)',
+          spanGaps: false, points: { show: false } },
+      ],
+    }, data, navWrap);
 
-    // --- Custom overlay ---
+    // --- Custom overlay for navigator selection ---
     var over = uNav.root.querySelector('.u-over');
-    var bbox = over.getBoundingClientRect();
-    navPlotWidth = over.clientWidth;
+    over.style.position = 'relative';
+    over.style.overflow = 'visible';
 
     var overlay = document.createElement('div');
-    overlay.className = 'nav-overlay';
-    overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+    overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
 
     var curtainL = document.createElement('div');
     curtainL.className = 'nav-curtain nav-curtain-l';
@@ -745,14 +763,12 @@ async function loadDashboard() {
     overlay.appendChild(curtainL);
     overlay.appendChild(sel);
     overlay.appendChild(curtainR);
-    over.style.position = 'relative';
     over.appendChild(overlay);
 
     function positionOverlay() {
       var maxW = over.clientWidth;
       var l = Math.max(0, Math.min(selLeft, maxW));
       var w = Math.max(0, Math.min(selWidth, maxW - l));
-      curtainL.style.left = '0';
       curtainL.style.width = l + 'px';
       sel.style.left = l + 'px';
       sel.style.width = w + 'px';
@@ -760,20 +776,12 @@ async function loadDashboard() {
       curtainR.style.width = (maxW - l - w) + 'px';
     }
 
-    // Initial position: last 3 hours
+    // Initial selection: last 3 hours
     selLeft = Math.round(uNav.valToPos(t3h, 'x'));
     selWidth = Math.round(uNav.valToPos(nowSec, 'x')) - selLeft;
     positionOverlay();
 
     // --- Drag interaction ---
-    function clampSel(l, w) {
-      var maxW = over.clientWidth;
-      if (l < 0) l = 0;
-      if (l + w > maxW) l = maxW - w;
-      if (w < 10) w = 10;
-      return [l, w];
-    }
-
     function startDrag(e, mode) {
       e.preventDefault();
       e.stopPropagation();
@@ -819,8 +827,7 @@ async function loadDashboard() {
     handleL.addEventListener('mousedown', function(e) { startDrag(e, 'left'); });
     handleR.addEventListener('mousedown', function(e) { startDrag(e, 'right'); });
 
-    // Click on curtain: jump selection center there
-    function curtainClick(e) {
+    curtainL.addEventListener('mousedown', function(e) {
       var rect = over.getBoundingClientRect();
       var clickX = e.clientX - rect.left;
       var newL = clickX - selWidth / 2;
@@ -830,9 +837,20 @@ async function loadDashboard() {
       selLeft = newL;
       positionOverlay();
       selToScale();
-    }
-    curtainL.addEventListener('click', curtainClick);
-    curtainR.addEventListener('click', curtainClick);
+      startDrag(e, 'pan');
+    });
+    curtainR.addEventListener('mousedown', function(e) {
+      var rect = over.getBoundingClientRect();
+      var clickX = e.clientX - rect.left;
+      var newL = clickX - selWidth / 2;
+      var maxW = over.clientWidth;
+      if (newL < 0) newL = 0;
+      if (newL + selWidth > maxW) newL = maxW - selWidth;
+      selLeft = newL;
+      positionOverlay();
+      selToScale();
+      startDrag(e, 'pan');
+    });
   }
 })();
 
