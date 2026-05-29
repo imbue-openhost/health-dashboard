@@ -6,6 +6,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
+RUN mkdir -p health_dashboard/src/health_dashboard && touch health_dashboard/src/health_dashboard/__init__.py
+RUN uv sync --no-dev
+
 COPY health_dashboard/ health_dashboard/
 RUN uv sync --no-dev
 
