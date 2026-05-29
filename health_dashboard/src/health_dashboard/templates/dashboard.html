@@ -491,8 +491,8 @@ function contribBar(label, val, color) {
     }
     html += '</div>';
     html += '<div class="card"><h3>Sleep Stages</h3><canvas id="lastStages"></canvas>';
-    html += '<h3 style="margin-top:1rem">Heart Rate</h3><canvas id="lastHr"></canvas>';
-    html += '<h3 style="margin-top:1rem">HRV</h3><canvas id="lastHrv"></canvas>';
+    html += '<h3 style="margin-top:1rem">Heart Rate</h3><div id="lastHr"></div>';
+    html += '<h3 style="margin-top:1rem">HRV</h3><div id="lastHrv"></div>';
     html += '</div>';
     html += '</div>';
     lnEl.innerHTML = html;
@@ -533,31 +533,54 @@ function contribBar(label, val, color) {
         },
       });
     }
+
+    function sleepUplot(container, samples, color, fillColor) {
+      var el = document.getElementById(container);
+      if (!el || !samples || samples.length === 0) return;
+      var w = el.clientWidth - 8;
+      var ts = new Float64Array(samples.length);
+      var vals = new Float64Array(samples.length);
+      for (var i = 0; i < samples.length; i++) {
+        ts[i] = new Date(samples[i].timestamp).getTime() / 1000;
+        vals[i] = samples[i].value;
+      }
+      var vMin = Math.floor((Math.min.apply(null, vals) - 5) / 10) * 10;
+      var vMax = Math.ceil((Math.max.apply(null, vals) + 5) / 10) * 10;
+      new uPlot({
+        width: w, height: 200, pxAlign: 0,
+        cursor: { drag: { x: false, y: false } },
+        legend: { show: false },
+        scales: { y: { auto: false, range: [vMin, vMax] } },
+        axes: [
+          { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
+            values: function(u, vs) {
+              return vs.map(function(v) {
+                return new Date(v * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
+              });
+            }
+          },
+          { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
+            splits: function(u) {
+              var r = u.scales.y;
+              var lo = Math.ceil(r.min / 10) * 10;
+              var hi = Math.floor(r.max / 10) * 10;
+              var out = [];
+              for (var v = lo; v <= hi; v += 10) out.push(v);
+              return out;
+            },
+            values: function(u, vs) { return vs.map(function(v) { return v + ''; }); }
+          },
+        ],
+        series: [ {},
+          { stroke: color, width: 1.5, fill: fillColor, points: { show: false } },
+        ],
+      }, [ts, vals], el);
+    }
+
     var hrData = lastReal.heart_rate;
-    if (hrData && hrData.samples && hrData.samples.length > 0) {
-      new Chart(document.getElementById('lastHr'), {
-        type: 'line',
-        data: {
-          labels: hrData.samples.map(timeFmt),
-          datasets: [{ label: 'bpm', data: hrData.samples.map(function(d) { return d.value; }),
-            borderColor: C.rose, tension: 0.3, pointRadius: 0, borderWidth: 1.5 }],
-        },
-        options: { ...chartOpts, plugins: { ...chartOpts.plugins, legend: { display: false } } },
-      });
-    }
+    if (hrData && hrData.samples) sleepUplot('lastHr', hrData.samples, C.rose, 'rgba(244,63,94,0.06)');
     var hrvData = lastReal.hrv;
-    if (hrvData && hrvData.samples && hrvData.samples.length > 0) {
-      new Chart(document.getElementById('lastHrv'), {
-        type: 'line',
-        data: {
-          labels: hrvData.samples.map(timeFmt),
-          datasets: [{ label: 'ms', data: hrvData.samples.map(function(d) { return d.value; }),
-            borderColor: C.cyan, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
-            fill: true, backgroundColor: 'rgba(6,182,212,0.08)' }],
-        },
-        options: { ...chartOpts, plugins: { ...chartOpts.plugins, legend: { display: false } } },
-      });
-    }
+    if (hrvData && hrvData.samples) sleepUplot('lastHrv', hrvData.samples, C.cyan, 'rgba(6,182,212,0.08)');
   } else {
     lnEl.innerHTML = '<div class="no-data">No data for last night yet.</div>';
   }
