@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Workouts - Health Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
 <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9/dist/leaflet.css">
@@ -69,6 +70,18 @@ var C = { rose: '#f43f5e', indigo: '#6366f1', emerald: '#10b981', amber: '#f59e0
 
 var useMiles = true;
 var useFeet = true;
+var hrZones = [104, 123, 142, 161, 180];
+var ZONE_COLORS = ['#94a3b8', '#10b981', '#f59e0b', '#f97316', '#ef4444'];
+var ZONE_NAMES = ['Z1 Recovery', 'Z2 Aerobic', 'Z3 Tempo', 'Z4 Threshold', 'Z5 Max'];
+
+function getZone(bpm) {
+  for (var i = 4; i >= 0; i--) {
+    if (bpm >= hrZones[i]) return i;
+  }
+  return 0;
+}
+
+function zoneColor(bpm) { return ZONE_COLORS[getZone(bpm)]; }
 
 function distVal(meters) { return useMiles ? meters / 1609.344 : meters / 1000; }
 function distUnit() { return useMiles ? 'mi' : 'km'; }
@@ -191,6 +204,13 @@ async function load() {
   var settings = await settingsResp.json();
   useMiles = settings.distance_unit === 'mi';
   useFeet = settings.elevation_unit === 'ft';
+  hrZones = [
+    parseInt(settings.hr_zone_1) || 104,
+    parseInt(settings.hr_zone_2) || 123,
+    parseInt(settings.hr_zone_3) || 142,
+    parseInt(settings.hr_zone_4) || 161,
+    parseInt(settings.hr_zone_5) || 180,
+  ];
   var data = await resp.json();
   workouts = data.data || [];
 
@@ -274,7 +294,11 @@ function showDetail(idx) {
   }
 
   if (hasHR) {
-    html += '<div class="card detail-full"><h3>Heart Rate</h3><div id="hr-chart"></div></div>';
+    html += '<div class="detail-grid">';
+    html += '<div class="card"><h3>Heart Rate</h3><div id="hr-chart"></div></div>';
+    html += '<div class="card"><h3>Time in Zones</h3><div id="zone-chart" style="max-width:280px;margin:0 auto"></div>';
+    html += '<div id="zone-legend" style="margin-top:0.75rem"></div></div>';
+    html += '</div>';
   }
 
   if (ra && ra.splits.length > 0) {
@@ -297,7 +321,10 @@ function showDetail(idx) {
 
   if (hasRoute) renderMap(w.route);
   if (ra && ra.elevations.length > 1) renderElevation(ra);
-  if (hasHR) renderHR(w.heart_rate.samples);
+  if (hasHR) {
+    renderHR(w.heart_rate.samples);
+    renderZonePie(w.heart_rate.samples);
+  }
 }
 
 function m(label, val) {
@@ -348,9 +375,90 @@ function renderHR(samples) {
       },
     ],
     series: [ {},
-      { stroke: C.rose, width: 1.5, fill: 'rgba(244,63,94,0.08)', points: { show: false }, label: 'bpm' },
+      { stroke: function(u, idx) { return zoneColor(u.data[1][idx]); },
+        width: 1.5,
+        fill: function(u) {
+          var can = u.root.querySelector('canvas');
+          var ctx = can.getContext('2d');
+          var data = u.data[1];
+          if (!data || data.length < 2) return 'rgba(148,163,184,0.08)';
+          var grad = ctx.createLinearGradient(0, 0, can.width, 0);
+          for (var i = 0; i < data.length; i++) {
+            var stop = i / (data.length - 1);
+            var c = zoneColor(data[i]);
+            grad.addColorStop(stop, c + '20');
+          }
+          return grad;
+        },
+        points: { show: false }, label: 'bpm' },
     ],
   }, [ts, vals], container);
+}
+
+function renderZonePie(samples) {
+  var container = document.getElementById('zone-chart');
+  if (!container) return;
+
+  var zoneMins = [0, 0, 0, 0, 0];
+  for (var i = 0; i < samples.length; i++) {
+    var z = getZone(samples[i].value);
+    var dt = 1;
+    if (i < samples.length - 1) {
+      dt = (new Date(samples[i + 1].timestamp) - new Date(samples[i].timestamp)) / 60000;
+      if (dt > 10) dt = 1;
+    }
+    zoneMins[z] += dt;
+  }
+
+  var total = zoneMins.reduce(function(a, b) { return a + b; }, 0);
+  var hasData = zoneMins.filter(function(v) { return v > 0; });
+  if (hasData.length === 0) return;
+
+  var canvas = document.createElement('canvas');
+  canvas.width = 280; canvas.height = 280;
+  container.appendChild(canvas);
+
+  new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels: ZONE_NAMES,
+      datasets: [{
+        data: zoneMins,
+        backgroundColor: ZONE_COLORS,
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      responsive: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(c) {
+              var min = c.raw;
+              var pct = total > 0 ? Math.round(min / total * 100) : 0;
+              return c.label + ': ' + Math.round(min) + 'm (' + pct + '%)';
+            }
+          }
+        }
+      },
+      cutout: '55%',
+    },
+  });
+
+  var legend = document.getElementById('zone-legend');
+  var html = '';
+  for (var i = 0; i < 5; i++) {
+    if (zoneMins[i] < 0.1) continue;
+    var pct = total > 0 ? Math.round(zoneMins[i] / total * 100) : 0;
+    html += '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;font-size:0.8rem">';
+    html += '<div style="width:10px;height:10px;border-radius:2px;background:' + ZONE_COLORS[i] + '"></div>';
+    html += '<span style="color:#94a3b8;width:100px">' + ZONE_NAMES[i] + '</span>';
+    html += '<span>' + Math.round(zoneMins[i]) + 'm</span>';
+    html += '<span style="color:#64748b">(' + pct + '%)</span>';
+    html += '</div>';
+  }
+  legend.innerHTML = html;
 }
 
 function renderElevation(ra) {

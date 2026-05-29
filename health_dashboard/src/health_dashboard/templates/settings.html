@@ -22,17 +22,40 @@
   .setting:last-child { margin-bottom: 0; }
   .setting label { display: block; font-size: 0.875rem; margin-bottom: 0.35rem; }
   .setting .desc { font-size: 0.75rem; color: #64748b; margin-bottom: 0.35rem; }
-  select {
-    width: 100%; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #334155;
+  select, input[type=number] {
+    padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #334155;
     background: #0f172a; color: #e2e8f0; font-size: 0.875rem;
-    appearance: auto;
   }
+  select { width: 100%; appearance: auto; }
+  input[type=number] { width: 80px; text-align: center; }
   .saved {
     color: #10b981; font-size: 0.8rem; margin-top: 0.75rem;
     opacity: 0; transition: opacity 0.2s;
   }
   .saved.show { opacity: 1; }
   .loading { color: #475569; font-size: 0.85rem; }
+  .zone-row {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .zone-color { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+  .zone-label { width: 90px; }
+  .zone-range { color: #64748b; font-size: 0.75rem; margin-left: 0.25rem; }
+  .gen-row {
+    display: flex; gap: 0.75rem; align-items: flex-end; margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+  .gen-row .field { display: flex; flex-direction: column; gap: 0.25rem; }
+  .gen-row .field label { font-size: 0.75rem; color: #94a3b8; }
+  .gen-row select { width: auto; }
+  .btn {
+    padding: 0.45rem 1rem; border-radius: 6px; border: none;
+    background: #6366f1; color: white; font-size: 0.8rem; font-weight: 600;
+    cursor: pointer;
+  }
+  .btn:hover { background: #4f46e5; }
+  .btn-sm { background: #334155; font-weight: 500; }
+  .btn-sm:hover { background: #475569; }
 </style>
 </head>
 <body>
@@ -43,58 +66,125 @@
 
 <div class="card">
   <h3>Units</h3>
-  <div id="settings-content"><div class="loading">Loading...</div></div>
+  <div id="units-content"><div class="loading">Loading...</div></div>
+</div>
+
+<div class="card">
+  <h3>Heart Rate Zones</h3>
+  <div class="setting">
+    <div class="desc">Generate zones from your max heart rate. Common formulas use 220 minus age, or Tanaka (208 - 0.7 &times; age).</div>
+    <div class="gen-row">
+      <div class="field">
+        <label>Age</label>
+        <input type="number" id="gen-age" min="10" max="100" value="30" style="width:60px">
+      </div>
+      <div class="field">
+        <label>Method</label>
+        <select id="gen-method">
+          <option value="220">220 - age</option>
+          <option value="tanaka" selected>Tanaka (208 - 0.7 &times; age)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button class="btn btn-sm" onclick="generateZones()">Generate</button>
+      </div>
+    </div>
+  </div>
+  <div id="zones-content"><div class="loading">Loading...</div></div>
   <div class="saved" id="saved">Settings saved</div>
 </div>
 
 <script>
+var ZONE_COLORS = ['#94a3b8', '#10b981', '#f59e0b', '#f97316', '#ef4444'];
+var ZONE_NAMES = ['Zone 1 (Recovery)', 'Zone 2 (Aerobic)', 'Zone 3 (Tempo)', 'Zone 4 (Threshold)', 'Zone 5 (Max)'];
+var ZONE_PCTS = [0.5, 0.6, 0.7, 0.8, 0.9];
+
+var currentSettings = {};
+
 async function load() {
   var resp = await fetch('/api/settings');
-  var settings = await resp.json();
-
-  var html = '';
-  html += '<div class="setting">';
-  html += '<label for="distance-unit">Distance</label>';
-  html += '<div class="desc">Used for workout distances, pace, and speed</div>';
-  html += '<select id="distance-unit">';
-  html += '<option value="mi"' + (settings.distance_unit === 'mi' ? ' selected' : '') + '>Miles (mi)</option>';
-  html += '<option value="km"' + (settings.distance_unit === 'km' ? ' selected' : '') + '>Kilometers (km)</option>';
-  html += '</select></div>';
-
-  html += '<div class="setting">';
-  html += '<label for="elevation-unit">Elevation</label>';
-  html += '<div class="desc">Used for elevation gain/loss and altitude</div>';
-  html += '<select id="elevation-unit">';
-  html += '<option value="ft"' + (settings.elevation_unit === 'ft' ? ' selected' : '') + '>Feet (ft)</option>';
-  html += '<option value="m"' + (settings.elevation_unit === 'm' ? ' selected' : '') + '>Meters (m)</option>';
-  html += '</select></div>';
-
-  html += '<div class="setting">';
-  html += '<label for="temp-unit">Temperature</label>';
-  html += '<div class="desc">Used for body temperature deviations</div>';
-  html += '<select id="temp-unit">';
-  html += '<option value="C"' + (settings.temp_unit === 'C' ? ' selected' : '') + '>&deg;C (Celsius)</option>';
-  html += '<option value="F"' + (settings.temp_unit === 'F' ? ' selected' : '') + '>&deg;F (Fahrenheit)</option>';
-  html += '</select></div>';
-
-  document.getElementById('settings-content').innerHTML = html;
-
-  document.querySelectorAll('select').forEach(function(sel) {
-    sel.addEventListener('change', save);
-  });
+  currentSettings = await resp.json();
+  renderUnits();
+  renderZones();
 }
 
-async function save() {
+function renderUnits() {
+  var s = currentSettings;
+  var html = '';
+  html += '<div class="setting"><label>Distance</label><div class="desc">Workout distances, pace, speed</div>';
+  html += '<select id="distance-unit" onchange="saveAll()">';
+  html += '<option value="mi"' + (s.distance_unit === 'mi' ? ' selected' : '') + '>Miles</option>';
+  html += '<option value="km"' + (s.distance_unit === 'km' ? ' selected' : '') + '>Kilometers</option>';
+  html += '</select></div>';
+
+  html += '<div class="setting"><label>Elevation</label><div class="desc">Elevation gain/loss, altitude</div>';
+  html += '<select id="elevation-unit" onchange="saveAll()">';
+  html += '<option value="ft"' + (s.elevation_unit === 'ft' ? ' selected' : '') + '>Feet</option>';
+  html += '<option value="m"' + (s.elevation_unit === 'm' ? ' selected' : '') + '>Meters</option>';
+  html += '</select></div>';
+
+  html += '<div class="setting"><label>Temperature</label><div class="desc">Body temperature deviations</div>';
+  html += '<select id="temp-unit" onchange="saveAll()">';
+  html += '<option value="C"' + (s.temp_unit === 'C' ? ' selected' : '') + '>&deg;C</option>';
+  html += '<option value="F"' + (s.temp_unit === 'F' ? ' selected' : '') + '>&deg;F</option>';
+  html += '</select></div>';
+
+  document.getElementById('units-content').innerHTML = html;
+}
+
+function renderZones() {
+  var s = currentSettings;
+  var zones = [
+    parseInt(s.hr_zone_1) || 104,
+    parseInt(s.hr_zone_2) || 123,
+    parseInt(s.hr_zone_3) || 142,
+    parseInt(s.hr_zone_4) || 161,
+    parseInt(s.hr_zone_5) || 180,
+  ];
+
+  var html = '';
+  for (var i = 0; i < 5; i++) {
+    var lo = i === 0 ? '0' : zones[i - 1];
+    html += '<div class="zone-row">';
+    html += '<div class="zone-color" style="background:' + ZONE_COLORS[i] + '"></div>';
+    html += '<div class="zone-label">' + ZONE_NAMES[i] + '</div>';
+    html += '<span class="zone-range">' + lo + ' &ndash;</span> ';
+    html += '<input type="number" id="zone-' + (i + 1) + '" value="' + zones[i] + '" min="40" max="250" onchange="saveAll()">';
+    html += '<span class="zone-range">bpm</span>';
+    html += '</div>';
+  }
+  document.getElementById('zones-content').innerHTML = html;
+}
+
+function generateZones() {
+  var age = parseInt(document.getElementById('gen-age').value) || 30;
+  var method = document.getElementById('gen-method').value;
+  var maxHR = method === 'tanaka' ? Math.round(208 - 0.7 * age) : 220 - age;
+
+  for (var i = 0; i < 5; i++) {
+    var bpm = Math.round(maxHR * ZONE_PCTS[i]);
+    document.getElementById('zone-' + (i + 1)).value = bpm;
+  }
+  saveAll();
+}
+
+async function saveAll() {
   var body = {
     distance_unit: document.getElementById('distance-unit').value,
     elevation_unit: document.getElementById('elevation-unit').value,
     temp_unit: document.getElementById('temp-unit').value,
   };
-  await fetch('/api/settings', {
+  for (var i = 1; i <= 5; i++) {
+    var el = document.getElementById('zone-' + i);
+    if (el) body['hr_zone_' + i] = el.value;
+  }
+  var resp = await fetch('/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  currentSettings = await resp.json();
   var el = document.getElementById('saved');
   el.classList.add('show');
   setTimeout(function() { el.classList.remove('show'); }, 1500);

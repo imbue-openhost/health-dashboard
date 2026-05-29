@@ -158,7 +158,8 @@ async def get_settings() -> dict:
 @post("/api/settings")
 async def save_settings(request: Request) -> dict:
     body = await request.json()
-    valid_keys = {"distance_unit", "elevation_unit", "temp_unit"}
+    valid_keys = {"distance_unit", "elevation_unit", "temp_unit",
+                   "hr_zone_1", "hr_zone_2", "hr_zone_3", "hr_zone_4", "hr_zone_5"}
     for key, value in body.items():
         if key in valid_keys and isinstance(value, str):
             await db.set_setting(key, value)

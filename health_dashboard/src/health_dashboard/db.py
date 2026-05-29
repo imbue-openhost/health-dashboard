@@ -15,6 +15,11 @@ DEFAULTS = {
     "distance_unit": "mi",
     "elevation_unit": "ft",
     "temp_unit": "C",
+    "hr_zone_1": "104",
+    "hr_zone_2": "123",
+    "hr_zone_3": "142",
+    "hr_zone_4": "161",
+    "hr_zone_5": "180",
 }
 
 
