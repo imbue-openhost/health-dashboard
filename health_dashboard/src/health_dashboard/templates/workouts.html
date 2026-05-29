@@ -379,26 +379,29 @@ function renderHR(samples) {
         points: { show: false }, label: 'bpm' },
     ],
     hooks: {
-      drawAxes: [function(u) {
+      draw: [function(u) {
         var ctx = u.ctx;
-        var left = u.bbox.left / devicePixelRatio;
-        var w = u.bbox.width / devicePixelRatio;
+        var left = u.bbox.left;
+        var w = u.bbox.width;
+        var zoneFills = ['#252d3d', '#1c2e2e', '#2a2820', '#2a2520', '#2a1f22'];
         var bands = [
           [0, hrZones[0]],
           [hrZones[0], hrZones[1]],
           [hrZones[1], hrZones[2]],
           [hrZones[2], hrZones[3]],
-          [hrZones[3], hrZones[4]],
+          [hrZones[3], 300],
         ];
+        ctx.save();
         for (var i = 0; i < bands.length; i++) {
           var lo = Math.max(bands[i][0], u.scales.y.min);
           var hi = Math.min(bands[i][1], u.scales.y.max);
           if (lo >= hi) continue;
-          var y0 = u.valToPos(hi, 'y', true) / devicePixelRatio;
-          var y1 = u.valToPos(lo, 'y', true) / devicePixelRatio;
-          ctx.fillStyle = ZONE_COLORS[i] + '18';
+          var y0 = u.valToPos(hi, 'y', true);
+          var y1 = u.valToPos(lo, 'y', true);
+          ctx.fillStyle = zoneFills[i];
           ctx.fillRect(left, y0, w, y1 - y0);
         }
+        ctx.restore();
       }],
     },
   }, [ts, vals], container);
