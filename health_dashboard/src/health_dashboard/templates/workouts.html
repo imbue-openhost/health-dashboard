@@ -69,8 +69,17 @@ const C = { rose: '#f43f5e', indigo: '#6366f1', emerald: '#10b981', amber: '#f59
 
 const TYPE_NAMES = {
   running: 'Running', cycling: 'Cycling', swimming: 'Swimming', walking: 'Walking',
-  hiking: 'Hiking', strength: 'Strength Training', yoga: 'Yoga', other: 'Workout'
+  hiking: 'Hiking', strength: 'Strength Training', yoga: 'Yoga',
+  hiit: 'HIIT', elliptical: 'Elliptical', rowing: 'Rowing',
+  stair_climbing: 'Stair Climbing', dance: 'Dance', pilates: 'Pilates',
+  core_training: 'Core Training', cross_training: 'Cross Training',
+  kickboxing: 'Kickboxing', martial_arts: 'Martial Arts',
 };
+
+function typeName(wtype) {
+  if (TYPE_NAMES[wtype]) return TYPE_NAMES[wtype];
+  return wtype.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
 
 function sv(obj) { return obj ? obj.value : null; }
 
@@ -174,7 +183,7 @@ async function load() {
 
   var html = '<div class="workout-list">';
   workouts.forEach(function(w, i) {
-    var type = TYPE_NAMES[w.workout_type] || w.workout_type;
+    var type = typeName(w.workout_type);
     var dur = w.duration ? toHM(sv(w.duration) * 60) : '';
     var cal = w.calories ? Math.round(sv(w.calories)) + ' kcal' : '';
     var dist = w.distance ? (sv(w.distance) / 1000).toFixed(1) + ' km' : '';
@@ -205,7 +214,7 @@ function showDetail(idx) {
   var detail = document.getElementById('detail');
   detail.style.display = 'block';
 
-  var type = TYPE_NAMES[w.workout_type] || w.workout_type;
+  var type = typeName(w.workout_type);
   var durSec = (new Date(w.end) - new Date(w.start)) / 1000;
   var durVal = w.duration ? sv(w.duration) * 60 : durSec;
 
