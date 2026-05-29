@@ -67,13 +67,8 @@
 <script>
 var C = { rose: '#f43f5e', indigo: '#6366f1', emerald: '#10b981', amber: '#f59e0b', cyan: '#06b6d4', slate: '#64748b' };
 
-var SETTINGS_DEFAULTS = { distance_unit: 'mi', elevation_unit: 'ft', temp_unit: 'C' };
-var settings = (function() {
-  try { return Object.assign({}, SETTINGS_DEFAULTS, JSON.parse(localStorage.getItem('health_dashboard_settings') || '{}')); }
-  catch(e) { return Object.assign({}, SETTINGS_DEFAULTS); }
-})();
-var useMiles = settings.distance_unit === 'mi';
-var useFeet = settings.elevation_unit === 'ft';
+var useMiles = true;
+var useFeet = true;
 
 function distVal(meters) { return useMiles ? meters / 1609.344 : meters / 1000; }
 function distUnit() { return useMiles ? 'mi' : 'km'; }
@@ -189,7 +184,13 @@ var workouts = [];
 var map = null;
 
 async function load() {
-  var resp = await fetch('/api/workouts?limit=50');
+  var [settingsResp, resp] = await Promise.all([
+    fetch('/api/settings'),
+    fetch('/api/workouts?limit=50'),
+  ]);
+  var settings = await settingsResp.json();
+  useMiles = settings.distance_unit === 'mi';
+  useFeet = settings.elevation_unit === 'ft';
   var data = await resp.json();
   workouts = data.data || [];
 

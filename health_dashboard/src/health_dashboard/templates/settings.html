@@ -32,6 +32,7 @@
     opacity: 0; transition: opacity 0.2s;
   }
   .saved.show { opacity: 1; }
+  .loading { color: #475569; font-size: 0.85rem; }
 </style>
 </head>
 <body>
@@ -42,63 +43,64 @@
 
 <div class="card">
   <h3>Units</h3>
-  <div class="setting">
-    <label for="distance-unit">Distance</label>
-    <div class="desc">Used for workout distances, pace, and speed</div>
-    <select id="distance-unit">
-      <option value="mi">Miles (mi)</option>
-      <option value="km">Kilometers (km)</option>
-    </select>
-  </div>
-  <div class="setting">
-    <label for="elevation-unit">Elevation</label>
-    <div class="desc">Used for elevation gain/loss and altitude</div>
-    <select id="elevation-unit">
-      <option value="ft">Feet (ft)</option>
-      <option value="m">Meters (m)</option>
-    </select>
-  </div>
-  <div class="setting">
-    <label for="temp-unit">Temperature</label>
-    <div class="desc">Used for body temperature deviations</div>
-    <select id="temp-unit">
-      <option value="C">&deg;C (Celsius)</option>
-      <option value="F">&deg;F (Fahrenheit)</option>
-    </select>
-  </div>
+  <div id="settings-content"><div class="loading">Loading...</div></div>
   <div class="saved" id="saved">Settings saved</div>
 </div>
 
 <script>
-var DEFAULTS = { distance_unit: 'mi', elevation_unit: 'ft', temp_unit: 'C' };
+async function load() {
+  var resp = await fetch('/api/settings');
+  var settings = await resp.json();
 
-function getSettings() {
-  try {
-    var s = JSON.parse(localStorage.getItem('health_dashboard_settings') || '{}');
-    return Object.assign({}, DEFAULTS, s);
-  } catch(e) { return Object.assign({}, DEFAULTS); }
-}
+  var html = '';
+  html += '<div class="setting">';
+  html += '<label for="distance-unit">Distance</label>';
+  html += '<div class="desc">Used for workout distances, pace, and speed</div>';
+  html += '<select id="distance-unit">';
+  html += '<option value="mi"' + (settings.distance_unit === 'mi' ? ' selected' : '') + '>Miles (mi)</option>';
+  html += '<option value="km"' + (settings.distance_unit === 'km' ? ' selected' : '') + '>Kilometers (km)</option>';
+  html += '</select></div>';
 
-function saveSettings(s) {
-  localStorage.setItem('health_dashboard_settings', JSON.stringify(s));
-}
+  html += '<div class="setting">';
+  html += '<label for="elevation-unit">Elevation</label>';
+  html += '<div class="desc">Used for elevation gain/loss and altitude</div>';
+  html += '<select id="elevation-unit">';
+  html += '<option value="ft"' + (settings.elevation_unit === 'ft' ? ' selected' : '') + '>Feet (ft)</option>';
+  html += '<option value="m"' + (settings.elevation_unit === 'm' ? ' selected' : '') + '>Meters (m)</option>';
+  html += '</select></div>';
 
-var settings = getSettings();
-document.getElementById('distance-unit').value = settings.distance_unit;
-document.getElementById('elevation-unit').value = settings.elevation_unit;
-document.getElementById('temp-unit').value = settings.temp_unit;
+  html += '<div class="setting">';
+  html += '<label for="temp-unit">Temperature</label>';
+  html += '<div class="desc">Used for body temperature deviations</div>';
+  html += '<select id="temp-unit">';
+  html += '<option value="C"' + (settings.temp_unit === 'C' ? ' selected' : '') + '>&deg;C (Celsius)</option>';
+  html += '<option value="F"' + (settings.temp_unit === 'F' ? ' selected' : '') + '>&deg;F (Fahrenheit)</option>';
+  html += '</select></div>';
 
-document.querySelectorAll('select').forEach(function(sel) {
-  sel.addEventListener('change', function() {
-    settings.distance_unit = document.getElementById('distance-unit').value;
-    settings.elevation_unit = document.getElementById('elevation-unit').value;
-    settings.temp_unit = document.getElementById('temp-unit').value;
-    saveSettings(settings);
-    var el = document.getElementById('saved');
-    el.classList.add('show');
-    setTimeout(function() { el.classList.remove('show'); }, 1500);
+  document.getElementById('settings-content').innerHTML = html;
+
+  document.querySelectorAll('select').forEach(function(sel) {
+    sel.addEventListener('change', save);
   });
-});
+}
+
+async function save() {
+  var body = {
+    distance_unit: document.getElementById('distance-unit').value,
+    elevation_unit: document.getElementById('elevation-unit').value,
+    temp_unit: document.getElementById('temp-unit').value,
+  };
+  await fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  var el = document.getElementById('saved');
+  el.classList.add('show');
+  setTimeout(function() { el.classList.remove('show'); }, 1500);
+}
+
+load();
 </script>
 </body>
 </html>

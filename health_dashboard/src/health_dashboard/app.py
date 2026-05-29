@@ -9,8 +9,10 @@ from health_data_service import (
     TimeSeriesRequest,
     WorkoutsRequest,
 )
-from litestar import Litestar, Request, get
+from litestar import Litestar, Request, get, post
 from litestar.response import Response
+
+from . import db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -148,12 +150,28 @@ async def proxy_workouts(request: Request) -> dict:
         return {"data": []}
 
 
+@get("/api/settings")
+async def get_settings() -> dict:
+    return await db.get_settings()
+
+
+@post("/api/settings")
+async def save_settings(request: Request) -> dict:
+    body = await request.json()
+    valid_keys = {"distance_unit", "elevation_unit", "temp_unit"}
+    for key, value in body.items():
+        if key in valid_keys and isinstance(value, str):
+            await db.set_setting(key, value)
+    return await db.get_settings()
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
 
 async def on_startup() -> None:
     global _client
+    await db.init_db()
     try:
         _client = HealthDataClient()
         await _client.__aenter__()
@@ -184,6 +202,8 @@ app = Litestar(
         proxy_sleep_sessions,
         proxy_time_series,
         proxy_workouts,
+        get_settings,
+        save_settings,
     ],
     on_startup=[on_startup],
     on_shutdown=[on_shutdown],

@@ -14,6 +14,9 @@ health_check = "/health"
 memory_mb = 128
 cpu_millicores = 100
 
+[data]
+sqlite = ["dashboard"]
+
 [[services.v2.consumes]]
 service = "github.com/imbue-openhost/health-data-service-spec"
 shortname = "health"
