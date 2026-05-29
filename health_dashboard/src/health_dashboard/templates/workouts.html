@@ -346,7 +346,7 @@ function renderHR(samples) {
   var yMin = Math.floor((Math.min.apply(null, vals) - 5) / 10) * 10;
   var yMax = Math.ceil((Math.max.apply(null, vals) + 5) / 10) * 10;
 
-  new uPlot({
+  var u = new uPlot({
     width: width, height: 250, pxAlign: 0,
     cursor: { drag: { x: true, y: false } },
     select: { over: false },
@@ -362,7 +362,7 @@ function renderHR(samples) {
           });
         }
       },
-      { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
+      { stroke: '#64748b', grid: { show: false }, ticks: { stroke: '#334155' }, font: '10px system-ui',
         splits: function(u) {
           var r = u.scales.y;
           var lo = Math.ceil(r.min / 10) * 10;
@@ -375,23 +375,32 @@ function renderHR(samples) {
       },
     ],
     series: [ {},
-      { stroke: function(u, idx) { return zoneColor(u.data[1][idx]); },
-        width: 1.5,
-        fill: function(u) {
-          var can = u.root.querySelector('canvas');
-          var ctx = can.getContext('2d');
-          var data = u.data[1];
-          if (!data || data.length < 2) return 'rgba(148,163,184,0.08)';
-          var grad = ctx.createLinearGradient(0, 0, can.width, 0);
-          for (var i = 0; i < data.length; i++) {
-            var stop = i / (data.length - 1);
-            var c = zoneColor(data[i]);
-            grad.addColorStop(stop, c + '20');
-          }
-          return grad;
-        },
+      { stroke: '#e2e8f0', width: 1.5, fill: 'rgba(226,232,240,0.04)',
         points: { show: false }, label: 'bpm' },
     ],
+    hooks: {
+      drawAxes: [function(u) {
+        var ctx = u.ctx;
+        var left = u.bbox.left / devicePixelRatio;
+        var w = u.bbox.width / devicePixelRatio;
+        var bands = [
+          [0, hrZones[0]],
+          [hrZones[0], hrZones[1]],
+          [hrZones[1], hrZones[2]],
+          [hrZones[2], hrZones[3]],
+          [hrZones[3], hrZones[4]],
+        ];
+        for (var i = 0; i < bands.length; i++) {
+          var lo = Math.max(bands[i][0], u.scales.y.min);
+          var hi = Math.min(bands[i][1], u.scales.y.max);
+          if (lo >= hi) continue;
+          var y0 = u.valToPos(hi, 'y', true) / devicePixelRatio;
+          var y1 = u.valToPos(lo, 'y', true) / devicePixelRatio;
+          ctx.fillStyle = ZONE_COLORS[i] + '18';
+          ctx.fillRect(left, y0, w, y1 - y0);
+        }
+      }],
+    },
   }, [ts, vals], container);
 }
 
