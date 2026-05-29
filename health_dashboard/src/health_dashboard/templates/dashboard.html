@@ -143,9 +143,14 @@ function scoreColor(v) { return v >= 85 ? C.emerald : v >= 70 ? C.amber : C.rose
 
 function getToday() {
   var now = new Date();
-  var pac = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-  if (pac.getHours() < 3) pac.setDate(pac.getDate() - 1);
-  return pac.toISOString().slice(0, 10);
+  var parts = now.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).split('-');
+  var h = parseInt(now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour12: false, hour: 'numeric' }));
+  var y = parseInt(parts[0]), m = parseInt(parts[1]), d = parseInt(parts[2]);
+  if (h < 3) {
+    d--;
+    if (d < 1) { m--; if (m < 1) { m = 12; y--; } d = new Date(y, m, 0).getDate(); }
+  }
+  return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
 }
 var DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 function fmtDate(iso) {
@@ -383,9 +388,11 @@ function contribBar(label, val, color) {
   var lastNightDay = null;
   if (lastReal) {
     var end = new Date(lastReal.end);
-    var endPac = new Date(end.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-    if (endPac.getHours() < 3) endPac.setDate(endPac.getDate() - 1);
-    lastNightDay = endPac.toISOString().slice(0, 10);
+    var endParts = end.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).split('-');
+    var endH = parseInt(end.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour12: false, hour: 'numeric' }));
+    var ey = parseInt(endParts[0]), em = parseInt(endParts[1]), ed = parseInt(endParts[2]);
+    if (endH < 3) { ed--; if (ed < 1) { em--; if (em < 1) { em = 12; ey--; } ed = new Date(ey, em, 0).getDate(); } }
+    lastNightDay = ey + '-' + String(em).padStart(2, '0') + '-' + String(ed).padStart(2, '0');
   }
 
   var readinessMap = {}, sleepScoreMap = {}, tempDevMap = {}, tempTrendMap = {};
