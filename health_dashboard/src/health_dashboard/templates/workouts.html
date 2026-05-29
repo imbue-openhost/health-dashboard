@@ -379,11 +379,17 @@ function renderHR(samples) {
         points: { show: false }, label: 'bpm' },
     ],
     hooks: {
-      draw: [function(u) {
+      drawAxes: [function(u) {
         var ctx = u.ctx;
         var left = u.bbox.left;
         var w = u.bbox.width;
-        var zoneFills = ['#252d3d', '#1c2e2e', '#2a2820', '#2a2520', '#2a1f22'];
+        var zoneFills = [
+          'rgba(148,163,184,0.08)',
+          'rgba(16,185,129,0.10)',
+          'rgba(245,158,11,0.10)',
+          'rgba(249,115,22,0.10)',
+          'rgba(239,68,68,0.12)',
+        ];
         var bands = [
           [0, hrZones[0]],
           [hrZones[0], hrZones[1]],
