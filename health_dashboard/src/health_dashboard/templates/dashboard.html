@@ -363,14 +363,15 @@ function contribBar(label, val, color) {
 // ---- Sleep + Today + History (loads independently) ----
 (async function() {
   var today = getToday();
-  var sessions, readinessTsResp, sleepScoreTsResp, tempDevResp, tempTrendResp;
+  var sessions, readinessTsResp, sleepScoreTsResp, tempDevResp, tempTrendResp, dashSettings;
   try {
-    [sessions, readinessTsResp, sleepScoreTsResp, tempDevResp, tempTrendResp] = await Promise.all([
+    [sessions, readinessTsResp, sleepScoreTsResp, tempDevResp, tempTrendResp, dashSettings] = await Promise.all([
       fetchJSON('/api/sleep-sessions?limit=60'),
       fetchJSON('/api/time-series?metric=readiness_score'),
       fetchJSON('/api/time-series?metric=sleep_score'),
       fetchJSON('/api/time-series?metric=temperature_deviation'),
       fetchJSON('/api/time-series?metric=temperature_trend_deviation'),
+      fetchJSON('/api/settings'),
     ]);
   } catch (e) {
     document.getElementById('last-night-loading').textContent = 'Could not load data.';
@@ -402,6 +403,10 @@ function contribBar(label, val, color) {
     if (endH < 3) { ed--; if (ed < 1) { em--; if (em < 1) { em = 12; ey--; } ed = new Date(ey, em, 0).getDate(); } }
     lastNightDay = ey + '-' + String(em).padStart(2, '0') + '-' + String(ed).padStart(2, '0');
   }
+
+  var useFahrenheit = dashSettings && dashSettings.temp_unit === 'F';
+  function tempConv(c) { return useFahrenheit ? c * 9 / 5 : c; }
+  function tempUnit() { return useFahrenheit ? '°F' : '°C'; }
 
   var readinessMap = {}, sleepScoreMap = {}, tempDevMap = {}, tempTrendMap = {};
   (readinessTsResp.samples || []).forEach(function(s) { readinessMap[s.timestamp.slice(0, 10)] = s.value; });
@@ -579,12 +584,14 @@ function contribBar(label, val, color) {
     html += '<div class="card"><h3>Body Signals</h3><div class="metrics">';
     var tempDev = tempDevMap[today], tempTrend = tempTrendMap[today];
     if (tempDev != null) {
-      html += '<div class="metric"><div class="val">' + (tempDev > 0 ? '+' : '') +
-        tempDev.toFixed(2) + '&deg;</div><div class="lbl">Temp Deviation</div></div>';
+      var td = tempConv(tempDev);
+      html += '<div class="metric"><div class="val">' + (td > 0 ? '+' : '') +
+        td.toFixed(2) + ' ' + tempUnit() + '</div><div class="lbl">Temp Deviation</div></div>';
     }
     if (tempTrend != null) {
-      html += '<div class="metric"><div class="val">' + (tempTrend > 0 ? '+' : '') +
-        tempTrend.toFixed(2) + '&deg;</div><div class="lbl">Temp Trend</div></div>';
+      var tt = tempConv(tempTrend);
+      html += '<div class="metric"><div class="val">' + (tt > 0 ? '+' : '') +
+        tt.toFixed(2) + ' ' + tempUnit() + '</div><div class="lbl">Temp Trend</div></div>';
     }
     html += '</div></div></div>';
     tEl.innerHTML = html;
