@@ -65,7 +65,24 @@
 <div id="detail"></div>
 
 <script>
-const C = { rose: '#f43f5e', indigo: '#6366f1', emerald: '#10b981', amber: '#f59e0b', cyan: '#06b6d4', slate: '#64748b' };
+var C = { rose: '#f43f5e', indigo: '#6366f1', emerald: '#10b981', amber: '#f59e0b', cyan: '#06b6d4', slate: '#64748b' };
+
+var SETTINGS_DEFAULTS = { distance_unit: 'mi', elevation_unit: 'ft', temp_unit: 'C' };
+var settings = (function() {
+  try { return Object.assign({}, SETTINGS_DEFAULTS, JSON.parse(localStorage.getItem('health_dashboard_settings') || '{}')); }
+  catch(e) { return Object.assign({}, SETTINGS_DEFAULTS); }
+})();
+var useMiles = settings.distance_unit === 'mi';
+var useFeet = settings.elevation_unit === 'ft';
+
+function distVal(meters) { return useMiles ? meters / 1609.344 : meters / 1000; }
+function distUnit() { return useMiles ? 'mi' : 'km'; }
+function elevVal(meters) { return useFeet ? meters * 3.28084 : meters; }
+function elevUnit() { return useFeet ? 'ft' : 'm'; }
+function paceLabel() { return useMiles ? '/mi' : '/km'; }
+function speedUnit() { return useMiles ? 'mph' : 'km/h'; }
+function paceFromSec(secPerKm) { return useMiles ? secPerKm * 1.60934 : secPerKm; }
+function speedFromKmh(kmh) { return useMiles ? kmh / 1.60934 : kmh; }
 
 const TYPE_NAMES = {
   running: 'Running', cycling: 'Cycling', swimming: 'Swimming', walking: 'Walking',
@@ -143,13 +160,14 @@ function analyzeRoute(route) {
 
   var splits = [];
   var splitIdx = 0;
-  for (var km = 1; km * 1000 <= totalDist + 1; km++) {
-    var target = km * 1000;
+  var splitMeters = useMiles ? 1609.344 : 1000;
+  for (var km = 1; km * splitMeters <= totalDist + 1; km++) {
+    var target = km * splitMeters;
     while (splitIdx < distances.length - 1 && distances[splitIdx + 1] < target) splitIdx++;
     if (splitIdx < timestamps.length - 1) {
       var frac = (target - distances[splitIdx]) / (distances[splitIdx + 1] - distances[splitIdx] || 1);
       var splitTime = timestamps[splitIdx] + frac * (timestamps[splitIdx + 1] - timestamps[splitIdx]);
-      var prevTarget = (km - 1) * 1000;
+      var prevTarget = (km - 1) * splitMeters;
       var prevIdx = 0;
       for (var j = 0; j < distances.length; j++) { if (distances[j] <= prevTarget) prevIdx = j; }
       var prevFrac = prevTarget > 0 ? (prevTarget - distances[prevIdx]) / (distances[prevIdx + 1] - distances[prevIdx] || 1) : 0;
@@ -186,7 +204,7 @@ async function load() {
     var type = typeName(w.workout_type);
     var dur = w.duration ? toHM(sv(w.duration) * 60) : '';
     var cal = w.calories ? Math.round(sv(w.calories)) + ' kcal' : '';
-    var dist = w.distance ? (sv(w.distance) / 1000).toFixed(1) + ' km' : '';
+    var dist = w.distance ? distVal(sv(w.distance)).toFixed(1) + ' ' + distUnit() : '';
     var parts = [dur, dist, cal].filter(Boolean);
     html += '<div class="workout-item" data-idx="' + i + '">'
       + '<div class="wi-left"><span class="wi-type">' + type + '</span>'
@@ -226,20 +244,21 @@ function showDetail(idx) {
   html += '<div class="metrics">';
 
   html += m('Duration', toHMS(durVal));
-  if (ra) html += m('Distance', (ra.totalDist / 1000).toFixed(2) + ' km');
-  else if (w.distance) html += m('Distance', (sv(w.distance) / 1000).toFixed(2) + ' km');
+  if (ra) html += m('Distance', distVal(ra.totalDist).toFixed(2) + ' ' + distUnit());
+  else if (w.distance) html += m('Distance', distVal(sv(w.distance)).toFixed(2) + ' ' + distUnit());
   if (ra && ra.totalDist > 0 && durVal > 0) {
-    html += m('Avg Pace', fmtPace(durVal / (ra.totalDist / 1000)) + ' /km');
-    html += m('Avg Speed', ((ra.totalDist / 1000) / (durVal / 3600)).toFixed(1) + ' km/h');
+    var pacePerUnit = useMiles ? durVal / (ra.totalDist / 1609.344) : durVal / (ra.totalDist / 1000);
+    html += m('Avg Pace', fmtPace(pacePerUnit) + ' ' + paceLabel());
+    html += m('Avg Speed', speedFromKmh((ra.totalDist / 1000) / (durVal / 3600)).toFixed(1) + ' ' + speedUnit());
   }
   if (w.calories) html += m('Calories', Math.round(sv(w.calories)) + ' kcal');
   if (w.average_heart_rate) html += m('Avg HR', Math.round(sv(w.average_heart_rate)) + ' bpm');
   if (w.max_heart_rate) html += m('Max HR', Math.round(sv(w.max_heart_rate)) + ' bpm');
-  if (ra && ra.elevGain > 0) html += m('Elev Gain', Math.round(ra.elevGain) + ' m');
-  if (ra && ra.elevLoss > 0) html += m('Elev Loss', Math.round(ra.elevLoss) + ' m');
+  if (ra && ra.elevGain > 0) html += m('Elev Gain', Math.round(elevVal(ra.elevGain)) + ' ' + elevUnit());
+  if (ra && ra.elevLoss > 0) html += m('Elev Loss', Math.round(elevVal(ra.elevLoss)) + ' ' + elevUnit());
   if (ra && ra.elevations.length > 0) {
-    html += m('Min Elev', Math.round(Math.min.apply(null, ra.elevations)) + ' m');
-    html += m('Max Elev', Math.round(Math.max.apply(null, ra.elevations)) + ' m');
+    html += m('Min Elev', Math.round(elevVal(Math.min.apply(null, ra.elevations))) + ' ' + elevUnit());
+    html += m('Max Elev', Math.round(elevVal(Math.max.apply(null, ra.elevations))) + ' ' + elevUnit());
   }
 
   html += '</div></div>';
@@ -261,12 +280,13 @@ function showDetail(idx) {
     var fastestPace = Math.min.apply(null, ra.splits.map(function(s) { return s.pace; }));
     var slowestPace = Math.max.apply(null, ra.splits.map(function(s) { return s.pace; }));
     html += '<div class="card"><h3>Splits</h3>';
-    html += '<table class="splits-table"><thead><tr><th>KM</th><th>Pace</th><th>Elev</th><th></th></tr></thead><tbody>';
+    var splitLabel = useMiles ? 'Mile' : 'KM';
+    html += '<table class="splits-table"><thead><tr><th>' + splitLabel + '</th><th>Pace</th><th>Elev</th><th></th></tr></thead><tbody>';
     ra.splits.forEach(function(s) {
       var pct = slowestPace > fastestPace ? 100 - ((s.pace - fastestPace) / (slowestPace - fastestPace) * 60) : 100;
       var barColor = s.pace <= fastestPace * 1.05 ? C.emerald : s.pace >= slowestPace * 0.95 ? C.rose : C.indigo;
-      var elevStr = s.elev != null ? (s.elev >= 0 ? '+' : '') + Math.round(s.elev) + ' m' : '--';
-      html += '<tr><td>' + s.km + '</td><td>' + fmtPace(s.pace) + ' /km</td><td>' + elevStr + '</td>'
+      var elevStr = s.elev != null ? (s.elev >= 0 ? '+' : '') + Math.round(elevVal(s.elev)) + ' ' + elevUnit() : '--';
+      html += '<tr><td>' + s.km + '</td><td>' + fmtPace(s.pace) + ' ' + paceLabel() + '</td><td>' + elevStr + '</td>'
         + '<td style="width:40%"><div class="pace-bar" style="width:' + pct + '%;background:' + barColor + '"></div></td></tr>';
     });
     html += '</tbody></table></div>';
@@ -337,16 +357,17 @@ function renderElevation(ra) {
   if (!container) return;
   var width = container.clientWidth - 8;
 
-  var distKm = new Float64Array(ra.distances.length);
-  var elev = new Float64Array(ra.elevations.length);
+  var distArr = new Float64Array(ra.distances.length);
+  var elevArr = new Float64Array(ra.elevations.length);
   var len = Math.min(ra.distances.length, ra.elevations.length);
   for (var i = 0; i < len; i++) {
-    distKm[i] = ra.distances[i] / 1000;
-    elev[i] = ra.elevations[i];
+    distArr[i] = distVal(ra.distances[i]);
+    elevArr[i] = elevVal(ra.elevations[i]);
   }
 
-  var eMin = Math.floor(Math.min.apply(null, elev) / 10) * 10 - 10;
-  var eMax = Math.ceil(Math.max.apply(null, elev) / 10) * 10 + 10;
+  var eMin = Math.floor(Math.min.apply(null, elevArr) / 10) * 10 - 10;
+  var eMax = Math.ceil(Math.max.apply(null, elevArr) / 10) * 10 + 10;
+  var du = distUnit(), eu = elevUnit();
 
   new uPlot({
     width: width, height: 200, pxAlign: 0,
@@ -358,16 +379,16 @@ function renderElevation(ra) {
     },
     axes: [
       { stroke: '#64748b', grid: { stroke: '#1e293b' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
-        values: function(u, vs) { return vs.map(function(v) { return v.toFixed(1) + ' km'; }); }
+        values: function(u, vs) { return vs.map(function(v) { return v.toFixed(1) + ' ' + du; }); }
       },
       { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
-        values: function(u, vs) { return vs.map(function(v) { return Math.round(v) + ' m'; }); }
+        values: function(u, vs) { return vs.map(function(v) { return Math.round(v) + ' ' + eu; }); }
       },
     ],
     series: [ {},
       { stroke: C.emerald, width: 1.5, fill: 'rgba(16,185,129,0.12)', points: { show: false }, label: 'Elevation' },
     ],
-  }, [distKm.slice(0, len), elev], container);
+  }, [distArr.slice(0, len), elevArr], container);
 }
 
 function renderMap(route) {

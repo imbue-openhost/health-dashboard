@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings - Health Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0f172a; color: #e2e8f0; padding: 1.5rem; max-width: 600px; margin: 0 auto;
+  }
+  .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+  .header a { color: #64748b; text-decoration: none; font-size: 0.85rem; }
+  h1 { font-size: 1.5rem; }
+  .card { background: #1e293b; border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+  .card h3 {
+    font-size: 0.85rem; color: #64748b; margin-bottom: 1rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .setting { margin-bottom: 1rem; }
+  .setting:last-child { margin-bottom: 0; }
+  .setting label { display: block; font-size: 0.875rem; margin-bottom: 0.35rem; }
+  .setting .desc { font-size: 0.75rem; color: #64748b; margin-bottom: 0.35rem; }
+  select {
+    width: 100%; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #334155;
+    background: #0f172a; color: #e2e8f0; font-size: 0.875rem;
+    appearance: auto;
+  }
+  .saved {
+    color: #10b981; font-size: 0.8rem; margin-top: 0.75rem;
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .saved.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="header">
+  <a href="/">&larr; Dashboard</a>
+  <h1>Settings</h1>
+</div>
+
+<div class="card">
+  <h3>Units</h3>
+  <div class="setting">
+    <label for="distance-unit">Distance</label>
+    <div class="desc">Used for workout distances, pace, and speed</div>
+    <select id="distance-unit">
+      <option value="mi">Miles (mi)</option>
+      <option value="km">Kilometers (km)</option>
+    </select>
+  </div>
+  <div class="setting">
+    <label for="elevation-unit">Elevation</label>
+    <div class="desc">Used for elevation gain/loss and altitude</div>
+    <select id="elevation-unit">
+      <option value="ft">Feet (ft)</option>
+      <option value="m">Meters (m)</option>
+    </select>
+  </div>
+  <div class="setting">
+    <label for="temp-unit">Temperature</label>
+    <div class="desc">Used for body temperature deviations</div>
+    <select id="temp-unit">
+      <option value="C">&deg;C (Celsius)</option>
+      <option value="F">&deg;F (Fahrenheit)</option>
+    </select>
+  </div>
+  <div class="saved" id="saved">Settings saved</div>
+</div>
+
+<script>
+var DEFAULTS = { distance_unit: 'mi', elevation_unit: 'ft', temp_unit: 'C' };
+
+function getSettings() {
+  try {
+    var s = JSON.parse(localStorage.getItem('health_dashboard_settings') || '{}');
+    return Object.assign({}, DEFAULTS, s);
+  } catch(e) { return Object.assign({}, DEFAULTS); }
+}
+
+function saveSettings(s) {
+  localStorage.setItem('health_dashboard_settings', JSON.stringify(s));
+}
+
+var settings = getSettings();
+document.getElementById('distance-unit').value = settings.distance_unit;
+document.getElementById('elevation-unit').value = settings.elevation_unit;
+document.getElementById('temp-unit').value = settings.temp_unit;
+
+document.querySelectorAll('select').forEach(function(sel) {
+  sel.addEventListener('change', function() {
+    settings.distance_unit = document.getElementById('distance-unit').value;
+    settings.elevation_unit = document.getElementById('elevation-unit').value;
+    settings.temp_unit = document.getElementById('temp-unit').value;
+    saveSettings(settings);
+    var el = document.getElementById('saved');
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 1500);
+  });
+});
+</script>
+</body>
+</html>

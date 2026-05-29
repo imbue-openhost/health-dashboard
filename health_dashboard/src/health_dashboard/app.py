@@ -19,6 +19,7 @@ _TEMPLATES = Path(__file__).parent / "templates"
 DASHBOARD_HTML = (_TEMPLATES / "dashboard.html").read_text()
 HEART_RATE_HTML = (_TEMPLATES / "heart_rate.html").read_text()
 WORKOUTS_HTML = (_TEMPLATES / "workouts.html").read_text()
+SETTINGS_HTML = (_TEMPLATES / "settings.html").read_text()
 
 _client: HealthDataClient | None = None
 
@@ -66,6 +67,11 @@ async def heart_rate_page() -> Response:
 @get("/workouts")
 async def workouts_page() -> Response:
     return Response(content=WORKOUTS_HTML, media_type="text/html")
+
+
+@get("/settings")
+async def settings_page() -> Response:
+    return Response(content=SETTINGS_HTML, media_type="text/html")
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +179,7 @@ app = Litestar(
         index,
         heart_rate_page,
         workouts_page,
+        settings_page,
         proxy_metrics,
         proxy_sleep_sessions,
         proxy_time_series,
