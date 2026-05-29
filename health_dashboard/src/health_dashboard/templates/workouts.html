@@ -315,7 +315,14 @@ function renderHR(samples) {
         }
       },
       { stroke: '#64748b', grid: { stroke: 'rgba(51,65,85,0.5)' }, ticks: { stroke: '#334155' }, font: '10px system-ui',
-        incrs: [10],
+        splits: function(u) {
+          var r = u.scales.y;
+          var lo = Math.ceil(r.min / 10) * 10;
+          var hi = Math.floor(r.max / 10) * 10;
+          var out = [];
+          for (var v = lo; v <= hi; v += 10) out.push(v);
+          return out;
+        },
         values: function(u, vs) { return vs.map(function(v) { return v + ''; }); }
       },
     ],
