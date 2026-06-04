@@ -145,6 +145,25 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function parseGpx(gpx) {
+  // Parse a GPX document into the point shape analyzeRoute/renderMap expect.
+  var doc = new DOMParser().parseFromString(gpx, 'application/xml');
+  var pts = doc.getElementsByTagName('trkpt');
+  var out = [];
+  for (var i = 0; i < pts.length; i++) {
+    var p = pts[i];
+    var ele = p.getElementsByTagName('ele')[0];
+    var t = p.getElementsByTagName('time')[0];
+    out.push({
+      lat: parseFloat(p.getAttribute('lat')),
+      lon: parseFloat(p.getAttribute('lon')),
+      altitude: ele ? parseFloat(ele.textContent) : null,
+      timestamp: t ? t.textContent : null,
+    });
+  }
+  return out;
+}
+
 function analyzeRoute(route) {
   var totalDist = 0, elevGain = 0, elevLoss = 0;
   var distances = [0];
@@ -258,8 +277,9 @@ function showDetail(idx) {
   var durVal = w.duration ? sv(w.duration) * 60 : durSec;
 
   var hasHR = w.heart_rate && w.heart_rate.samples && w.heart_rate.samples.length > 0;
-  var hasRoute = w.route && w.route.length > 1;
-  var ra = hasRoute ? analyzeRoute(w.route) : null;
+  var route = w.route_gpx ? parseGpx(w.route_gpx) : null;
+  var hasRoute = route && route.length > 1;
+  var ra = hasRoute ? analyzeRoute(route) : null;
 
   var html = '<div class="card"><h3>' + type + ' &mdash; ' + fmtDate(w.start) + ', ' + fmtTime(w.start) + ' - ' + fmtTime(w.end) + '</h3>';
   html += '<div class="metrics">';
@@ -319,7 +339,7 @@ function showDetail(idx) {
 
   detail.innerHTML = html;
 
-  if (hasRoute) renderMap(w.route);
+  if (hasRoute) renderMap(route);
   if (ra && ra.elevations.length > 1) renderElevation(ra);
   if (hasHR) {
     renderHR(w.heart_rate.samples);
