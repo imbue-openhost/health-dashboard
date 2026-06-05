@@ -41,6 +41,51 @@ def _generate_hr_samples():
 
 _HR_SAMPLES = _generate_hr_samples()
 
+_WORKOUT_ID = "wk-mock-1"
+_WORKOUTS_PATH = "/api/services/v2/call/health/v1/workouts"
+
+
+def _sv(metric_id, display, unit, value):
+    return {"metric_id": metric_id, "display_name": display, "unit": unit,
+            "value": value, "source": "mock"}
+
+
+def _workout_summary():
+    """Scalar-only summary, as the list endpoint returns it."""
+    return {
+        "id": _WORKOUT_ID,
+        "start": "2026-06-01T08:00:00+00:00",
+        "end": "2026-06-01T08:30:00+00:00",
+        "workout_type": "running",
+        "source": "mock",
+        "duration": _sv("duration", "Duration", "min", 30.0),
+        "calories": _sv("calories", "Calories", "kcal", 300.0),
+        "distance": _sv("distance", "Distance", "m", 5000.0),
+        "average_heart_rate": _sv("average_heart_rate", "Avg Heart Rate", "bpm", 150.0),
+    }
+
+
+def _workout_detail(workout_id):
+    """Full detail: summary plus the heart-rate trace and route."""
+    w = _workout_summary()
+    w["id"] = workout_id
+    w["heart_rate"] = {
+        "metric_id": "heart_rate", "display_name": "Heart Rate", "unit": "bpm",
+        "source": "mock",
+        "samples": [
+            {"timestamp": "2026-06-01T08:00:00+00:00", "value": 140.0},
+            {"timestamp": "2026-06-01T08:01:00+00:00", "value": 150.0},
+        ],
+    }
+    w["route_gpx"] = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>'
+        '<trkpt lat="37.0" lon="-122.0"><ele>10</ele><time>2026-06-01T08:00:00Z</time></trkpt>'
+        '<trkpt lat="37.001" lon="-122.001"><ele>11</ele><time>2026-06-01T08:01:00Z</time></trkpt>'
+        '</trkseg></trk></gpx>'
+    )
+    return w
+
 
 class _MockHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -77,8 +122,13 @@ class _MockHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/v2/call/health/v1/sleep-sessions"):
             return self._json({"data": []})
 
-        if path.startswith("/api/services/v2/call/health/v1/workouts"):
-            return self._json({"data": []})
+        if path.startswith(_WORKOUTS_PATH):
+            workout_id = path[len(_WORKOUTS_PATH):].strip("/")
+            if workout_id:
+                if workout_id == _WORKOUT_ID:
+                    return self._json(_workout_detail(workout_id))
+                return self._json({"error": "not found"}, 404)
+            return self._json({"data": [_workout_summary()]})
 
         if path.startswith("/api/services/v2/call/health/v1/metrics"):
             return self._json({"metrics": [

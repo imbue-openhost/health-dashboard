@@ -150,6 +150,20 @@ async def proxy_workouts(request: Request) -> dict:
         return {"data": []}
 
 
+@get("/api/workouts/{workout_id:str}")
+async def proxy_workout(workout_id: str) -> dict:
+    """Full detail for one workout (heart-rate trace + route), fetched lazily
+    so the list stays small."""
+    if _client is None:
+        return {}
+    try:
+        workout = await _client.get_workout_merged(workout_id)
+        return _serialize(workout) if workout else {}
+    except Exception:
+        log.exception("Failed to fetch workout %s", workout_id)
+        return {}
+
+
 @get("/api/settings")
 async def get_settings() -> dict:
     return await db.get_settings()
@@ -203,6 +217,7 @@ app = Litestar(
         proxy_sleep_sessions,
         proxy_time_series,
         proxy_workouts,
+        proxy_workout,
         get_settings,
         save_settings,
     ],

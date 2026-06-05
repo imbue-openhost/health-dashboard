@@ -217,7 +217,7 @@ dev = [
 [[package]]
 name = "health-data-service"
 version = "0.1.0"
-source = { git = "https://github.com/imbue-openhost/health-data-service-spec?branch=main#92f68f7599be153844fff694ee2eccf9f9eb7f23" }
+source = { git = "https://github.com/imbue-openhost/health-data-service-spec?branch=main#0dcd7352b183f31110dd2f53009e1f5f7d38d71a" }
 dependencies = [
     { name = "attrs" },
     { name = "cattrs" },

@@ -214,6 +214,8 @@ function analyzeRoute(route) {
 
 var workouts = [];
 var map = null;
+var detailCache = {};
+var detailReq = 0;
 
 async function load() {
   var [settingsResp, resp] = await Promise.all([
@@ -267,10 +269,25 @@ async function load() {
   document.querySelector('.workout-item').classList.add('active');
 }
 
-function showDetail(idx) {
-  var w = workouts[idx];
+async function showDetail(idx) {
   var detail = document.getElementById('detail');
   detail.style.display = 'block';
+
+  // The list carries only scalar summaries; fetch the full workout (heart-rate
+  // trace + route) on demand, caching per id.
+  var w = workouts[idx];
+  var myReq = ++detailReq;
+  var full = detailCache[w.id];
+  if (!full) {
+    detail.innerHTML = '<div class="card">Loading…</div>';
+    try {
+      var r = await fetch('/api/workouts/' + encodeURIComponent(w.id));
+      full = await r.json();
+    } catch (e) { full = null; }
+    if (myReq !== detailReq) return;  // superseded by a newer selection
+    if (full && full.id) detailCache[w.id] = full;
+  }
+  if (full && full.id) w = full;
 
   var type = typeName(w.workout_type);
   var durSec = (new Date(w.end) - new Date(w.start)) / 1000;
