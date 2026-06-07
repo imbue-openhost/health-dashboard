@@ -7,10 +7,10 @@ def test_workouts_list_is_summary_and_detail_loads(stack):
         page = browser.new_page(viewport={"width": 1200, "height": 900})
         page.goto(f"{stack.url}/workouts")
 
-        # List renders, and the first workout is auto-selected, which lazily
-        # fetches detail and draws the HR chart from the fetched trace. (The map
-        # is left to a separate check below — it depends on an external tile CDN.)
-        page.wait_for_selector(".workout-item", timeout=20000)
+        # Calendar renders, and the most recent workout is auto-selected, which
+        # lazily fetches detail and draws the HR chart from the fetched trace. (The
+        # map is left to a separate check below — it depends on an external tile CDN.)
+        page.wait_for_selector(".cal-chip", timeout=20000)
         page.wait_for_selector("#hr-chart canvas", timeout=20000)
 
         # The list payload is a summary: no per-sample trace, no route.

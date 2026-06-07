@@ -29,18 +29,47 @@
   .metric .val { font-size: 1.15rem; font-weight: 700; }
   .metric .lbl { font-size: 0.7rem; color: #64748b; margin-top: 0.15rem; }
 
-  .workout-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem; }
-  .workout-item {
-    background: #1e293b; border-radius: 10px; padding: 0.85rem 1rem;
-    cursor: pointer; display: flex; justify-content: space-between; align-items: center;
-    transition: background 0.15s;
+  .cal-wrap { background: #1e293b; border-radius: 14px; padding: 1.1rem 1.1rem 1.3rem; margin-bottom: 1.5rem; }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+  .cal-title { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
+  .cal-nav { display: flex; gap: 0.4rem; align-items: center; }
+  .cal-btn {
+    background: #0f172a; border: 1px solid #334155; color: #94a3b8;
+    height: 32px; min-width: 32px; border-radius: 8px; cursor: pointer; font-size: 1rem;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s; padding: 0;
   }
-  .workout-item:hover { background: #334155; }
-  .workout-item.active { background: #334155; border-left: 3px solid #6366f1; }
-  .workout-item .wi-left { display: flex; flex-direction: column; gap: 0.15rem; }
-  .workout-item .wi-type { font-weight: 600; font-size: 0.95rem; }
-  .workout-item .wi-date { font-size: 0.75rem; color: #64748b; }
-  .workout-item .wi-right { text-align: right; font-size: 0.8rem; color: #94a3b8; }
+  .cal-btn:hover { background: #334155; color: #e2e8f0; }
+  .cal-today { padding: 0 0.7rem; font-size: 0.78rem; }
+
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-dow {
+    text-align: center; font-size: 0.68rem; color: #64748b; text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: 600; padding-bottom: 0.3rem;
+  }
+  .cal-cell {
+    background: #0f172a; border-radius: 8px; min-height: 90px; padding: 5px;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .cal-cell.empty { background: transparent; }
+  .cal-cell.today { outline: 1px solid #6366f1; outline-offset: -1px; }
+  .cal-daynum { font-size: 0.72rem; color: #64748b; font-weight: 600; padding: 1px 3px; }
+  .cal-cell.today .cal-daynum { color: #a5b4fc; }
+  .cal-chip {
+    font-size: 0.68rem; line-height: 1.25; padding: 3px 5px; border-radius: 5px;
+    cursor: pointer; border-left: 3px solid; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; transition: filter 0.12s;
+  }
+  .cal-chip:hover { filter: brightness(1.4); }
+  .cal-chip.active { box-shadow: 0 0 0 1.5px #e2e8f0; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 0.45rem 0.9rem; margin-top: 1rem; }
+  .legend-item { display: flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; color: #94a3b8; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+  @media (max-width: 640px) {
+    .cal-cell { min-height: 64px; }
+    .cal-chip { font-size: 0.6rem; padding: 2px 4px; }
+  }
 
   #detail { display: none; }
   #map { height: 350px; border-radius: 10px; margin-top: 0.5rem; }
@@ -217,10 +246,158 @@ var map = null;
 var detailCache = {};
 var detailReq = 0;
 
+// Calendar state
+var TYPE_PALETTE = ['#6366f1', '#10b981', '#f43f5e', '#f59e0b', '#06b6d4',
+                    '#a855f7', '#ec4899', '#84cc16', '#2dd4bf', '#fb923c'];
+var GREY = '#64748b';
+var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+              'August', 'September', 'October', 'November', 'December'];
+var typeColors = {};
+var byDate = {};
+var viewYear, viewMonth;
+var activeIdx = -1;
+
+function computeTypeColors() {
+  // Allocate the palette to the most frequent types over the last ~year, so the
+  // mapping stays stable as new workouts arrive; the rest share grey. Older
+  // workouts whose type drops out of the recent top-N fall back to grey too.
+  var cutoff = Date.now() - 365 * 24 * 3600 * 1000;
+  var counts = {};
+  workouts.forEach(function(w) {
+    if (new Date(w.start).getTime() < cutoff) return;
+    counts[w.workout_type] = (counts[w.workout_type] || 0) + 1;
+  });
+  var types = Object.keys(counts).sort(function(a, b) {
+    return counts[b] - counts[a] || a.localeCompare(b);
+  });
+  typeColors = {};
+  types.forEach(function(t, i) { typeColors[t] = i < TYPE_PALETTE.length ? TYPE_PALETTE[i] : GREY; });
+}
+
+function colorForType(t) { return typeColors[t] || GREY; }
+
+function dateKey(iso) {
+  // Group workouts by their LA calendar date, matching the displayed times.
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+}
+
+function buildIndex() {
+  byDate = {};
+  workouts.forEach(function(w, i) {
+    var k = dateKey(w.start);
+    (byDate[k] = byDate[k] || []).push(i);
+  });
+}
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function cellKey(y, m, d) { return y + '-' + pad2(m + 1) + '-' + pad2(d); }
+function todayKey() { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }); }
+
+function hexA(hex, a) {
+  var n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function renderCalendar() {
+  var first = new Date(viewYear, viewMonth, 1);
+  var startDow = first.getDay();
+  var daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  var tKey = todayKey();
+
+  var html = '<div class="cal-wrap">';
+  html += '<div class="cal-head"><div class="cal-title">' + MONTHS[viewMonth] + ' ' + viewYear + '</div>';
+  html += '<div class="cal-nav">'
+    + '<button class="cal-btn" id="cal-prev" title="Previous month">&lsaquo;</button>'
+    + '<button class="cal-btn cal-today" id="cal-jump">Today</button>'
+    + '<button class="cal-btn" id="cal-next" title="Next month">&rsaquo;</button>'
+    + '</div></div>';
+
+  html += '<div class="cal-grid">';
+  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(function(d) {
+    html += '<div class="cal-dow">' + d + '</div>';
+  });
+
+  for (var b = 0; b < startDow; b++) html += '<div class="cal-cell empty"></div>';
+
+  for (var day = 1; day <= daysInMonth; day++) {
+    var k = cellKey(viewYear, viewMonth, day);
+    var cls = 'cal-cell' + (k === tKey ? ' today' : '');
+    html += '<div class="' + cls + '"><div class="cal-daynum">' + day + '</div>';
+    var idxs = (byDate[k] || []).slice().sort(function(a, c) {
+      return new Date(workouts[a].start) - new Date(workouts[c].start);
+    });
+    idxs.forEach(function(i) {
+      var w = workouts[i];
+      var col = colorForType(w.workout_type);
+      var dur = w.duration ? toHM(sv(w.duration) * 60) : '';
+      var dist = w.distance ? distVal(sv(w.distance)).toFixed(1) + ' ' + distUnit() : '';
+      var tip = typeName(w.workout_type) + ' · ' + fmtTime(w.start)
+        + (dur ? ' · ' + dur : '') + (dist ? ' · ' + dist : '');
+      html += '<div class="cal-chip' + (i === activeIdx ? ' active' : '') + '" data-idx="' + i + '"'
+        + ' title="' + esc(tip) + '"'
+        + ' style="background:' + hexA(col, 0.16) + ';border-left-color:' + col + '">'
+        + esc(typeName(w.workout_type)) + '</div>';
+    });
+    html += '</div>';
+  }
+
+  var trail = (startDow + daysInMonth) % 7;
+  if (trail) for (var t = trail; t < 7; t++) html += '<div class="cal-cell empty"></div>';
+
+  html += '</div>';
+  html += '<div class="legend">' + legendHtml() + '</div>';
+  html += '</div>';
+
+  document.getElementById('app').innerHTML = html;
+
+  document.getElementById('cal-prev').addEventListener('click', function() { stepMonth(-1); });
+  document.getElementById('cal-next').addEventListener('click', function() { stepMonth(1); });
+  document.getElementById('cal-jump').addEventListener('click', function() {
+    var n = new Date();
+    viewYear = n.getFullYear(); viewMonth = n.getMonth();
+    renderCalendar();
+  });
+  document.querySelectorAll('.cal-chip').forEach(function(el) {
+    el.addEventListener('click', function() { selectWorkout(parseInt(el.dataset.idx)); });
+  });
+}
+
+function legendHtml() {
+  var html = '';
+  Object.keys(typeColors).forEach(function(t) {
+    if (typeColors[t] === GREY) return;
+    html += '<div class="legend-item"><span class="legend-dot" style="background:' + typeColors[t]
+      + '"></span>' + esc(typeName(t)) + '</div>';
+  });
+  var hasOther = Object.keys(typeColors).some(function(t) { return typeColors[t] === GREY; });
+  if (hasOther) html += '<div class="legend-item"><span class="legend-dot" style="background:' + GREY
+    + '"></span>Other</div>';
+  return html;
+}
+
+function stepMonth(delta) {
+  viewMonth += delta;
+  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+  else if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+  renderCalendar();
+}
+
+function selectWorkout(idx) {
+  activeIdx = idx;
+  document.querySelectorAll('.cal-chip').forEach(function(e) {
+    e.classList.toggle('active', parseInt(e.dataset.idx) === idx);
+  });
+  showDetail(idx);
+}
+
 async function load() {
   var [settingsResp, resp] = await Promise.all([
     fetch('/api/settings'),
-    fetch('/api/workouts?limit=50'),
+    fetch('/api/workouts?limit=500'),
   ]);
   var settings = await settingsResp.json();
   useMiles = settings.distance_unit === 'mi';
@@ -241,32 +418,17 @@ async function load() {
     return;
   }
 
-  var html = '<div class="workout-list">';
-  workouts.forEach(function(w, i) {
-    var type = typeName(w.workout_type);
-    var dur = w.duration ? toHM(sv(w.duration) * 60) : '';
-    var cal = w.calories ? Math.round(sv(w.calories)) + ' kcal' : '';
-    var dist = w.distance ? distVal(sv(w.distance)).toFixed(1) + ' ' + distUnit() : '';
-    var parts = [dur, dist, cal].filter(Boolean);
-    html += '<div class="workout-item" data-idx="' + i + '">'
-      + '<div class="wi-left"><span class="wi-type">' + type + '</span>'
-      + '<span class="wi-date">' + fmtDate(w.start) + ' ' + fmtTime(w.start) + '</span></div>'
-      + '<div class="wi-right">' + parts.join(' &middot; ') + '</div>'
-      + '</div>';
-  });
-  html += '</div>';
-  app.innerHTML = html;
+  computeTypeColors();
+  buildIndex();
 
-  document.querySelectorAll('.workout-item').forEach(function(el) {
-    el.addEventListener('click', function() {
-      document.querySelectorAll('.workout-item').forEach(function(e) { e.classList.remove('active'); });
-      el.classList.add('active');
-      showDetail(parseInt(el.dataset.idx));
-    });
-  });
+  // Open on the most recent workout's month, with that workout selected.
+  var latest = dateKey(workouts[0].start).split('-');
+  viewYear = parseInt(latest[0]);
+  viewMonth = parseInt(latest[1]) - 1;
+  activeIdx = 0;
 
+  renderCalendar();
   showDetail(0);
-  document.querySelector('.workout-item').classList.add('active');
 }
 
 async function showDetail(idx) {
