@@ -151,6 +151,15 @@ function calDur(w) {
   return min < 60 ? Math.round(min) + 'm' : (min / 60).toFixed(1) + 'hr';
 }
 
+function calMetric(w) {
+  // Distance-based workouts show distance (e.g. "5.2mi"); swimming and the rest
+  // show duration.
+  if (w.workout_type !== 'swimming' && w.distance && sv(w.distance) > 0) {
+    return distVal(sv(w.distance)).toFixed(1) + distUnit();
+  }
+  return calDur(w);
+}
+
 function toHMS(seconds) {
   if (!seconds || seconds <= 0) return '--';
   var h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = Math.round(seconds % 60);
@@ -416,7 +425,7 @@ function renderCalendar() {
       html += '<div class="cal-chip' + (i === activeIdx ? ' active' : '') + '" data-idx="' + i + '"'
         + ' title="' + esc(tip) + '"'
         + ' style="background:' + hexA(col, 0.16) + ';border-left-color:' + col + '">'
-        + esc(typeName(w.workout_type)) + (calDur(w) ? ' - ' + calDur(w) : '') + '</div>';
+        + esc(typeName(w.workout_type)) + (calMetric(w) ? ' - ' + calMetric(w) : '') + '</div>';
     });
     html += '</div>';
   }
