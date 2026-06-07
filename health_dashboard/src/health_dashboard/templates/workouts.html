@@ -219,12 +219,18 @@ function analyzeRoute(route) {
       var d = haversine(route[i - 1].lat, route[i - 1].lon, route[i].lat, route[i].lon);
       totalDist += d;
       distances.push(totalDist);
-      if (route[i].altitude != null && route[i - 1].altitude != null) {
-        var dElev = route[i].altitude - route[i - 1].altitude;
-        if (dElev > 0.5) elevGain += dElev;
-        else if (dElev < -0.5) elevLoss -= dElev;
-      }
     }
+  }
+
+  // Cumulative gain/loss via a 3m deadband (hysteresis). Dense GPS tracks climb
+  // well under a metre per sample, so a per-sample threshold discards almost all
+  // real gain; the deadband only registers a move once it clears the noise floor.
+  var ELEV_DEADBAND = 3;
+  var elevRef = elevations.length ? elevations[0] : 0;
+  for (var e = 1; e < elevations.length; e++) {
+    var diff = elevations[e] - elevRef;
+    if (diff > ELEV_DEADBAND) { elevGain += diff; elevRef = elevations[e]; }
+    else if (diff < -ELEV_DEADBAND) { elevLoss += -diff; elevRef = elevations[e]; }
   }
 
   var splits = [];
