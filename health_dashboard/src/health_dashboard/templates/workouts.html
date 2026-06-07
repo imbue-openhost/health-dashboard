@@ -144,6 +144,13 @@ function toHM(seconds) {
   return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
 }
 
+function calDur(w) {
+  // Compact duration for calendar chips: <1hr -> "36m", >=1hr -> "1.5hr".
+  var min = w.duration ? sv(w.duration) : (new Date(w.end) - new Date(w.start)) / 60000;
+  if (!min || min <= 0) return '';
+  return min < 60 ? Math.round(min) + 'm' : (min / 60).toFixed(1) + 'hr';
+}
+
 function toHMS(seconds) {
   if (!seconds || seconds <= 0) return '--';
   var h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = Math.round(seconds % 60);
@@ -409,7 +416,7 @@ function renderCalendar() {
       html += '<div class="cal-chip' + (i === activeIdx ? ' active' : '') + '" data-idx="' + i + '"'
         + ' title="' + esc(tip) + '"'
         + ' style="background:' + hexA(col, 0.16) + ';border-left-color:' + col + '">'
-        + esc(typeName(w.workout_type)) + '</div>';
+        + esc(typeName(w.workout_type)) + (calDur(w) ? ' - ' + calDur(w) : '') + '</div>';
     });
     html += '</div>';
   }
