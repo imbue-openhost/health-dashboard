@@ -63,10 +63,6 @@
   .cal-chip:hover { filter: brightness(1.4); }
   .cal-chip.active { box-shadow: 0 0 0 1.5px #e2e8f0; }
 
-  .legend { display: flex; flex-wrap: wrap; gap: 0.45rem 0.9rem; margin-top: 1rem; }
-  .legend-item { display: flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; color: #94a3b8; }
-  .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-
   @media (max-width: 640px) {
     .cal-cell { min-height: 64px; }
     .cal-chip { font-size: 0.6rem; padding: 2px 4px; }
@@ -434,7 +430,6 @@ function renderCalendar() {
   if (trail) for (var t = trail; t < 7; t++) html += '<div class="cal-cell empty"></div>';
 
   html += '</div>';
-  html += '<div class="legend">' + legendHtml() + '</div>';
   html += '</div>';
 
   document.getElementById('app').innerHTML = html;
@@ -450,19 +445,6 @@ function renderCalendar() {
   document.querySelectorAll('.cal-chip').forEach(function(el) {
     el.addEventListener('click', function() { selectWorkout(parseInt(el.dataset.idx)); });
   });
-}
-
-function legendHtml() {
-  var html = '';
-  Object.keys(typeColors).forEach(function(t) {
-    if (typeColors[t] === GREY) return;
-    html += '<div class="legend-item"><span class="legend-dot" style="background:' + typeColors[t]
-      + '"></span>' + esc(typeName(t)) + '</div>';
-  });
-  var hasOther = Object.keys(typeColors).some(function(t) { return typeColors[t] === GREY; });
-  if (hasOther) html += '<div class="legend-item"><span class="legend-dot" style="background:' + GREY
-    + '"></span>Other</div>';
-  return html;
 }
 
 function stepMonth(delta) {
