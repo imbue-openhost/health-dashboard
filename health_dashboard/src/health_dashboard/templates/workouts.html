@@ -32,6 +32,7 @@
   .cal-wrap { background: #1e293b; border-radius: 14px; padding: 1.1rem 1.1rem 1.3rem; margin-bottom: 1.5rem; }
   .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
   .cal-title { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
+  .cal-load { font-size: 0.75rem; font-weight: 500; color: #64748b; letter-spacing: 0; }
   .cal-nav { display: flex; gap: 0.4rem; align-items: center; }
   .cal-btn {
     background: #0f172a; border: 1px solid #334155; color: #94a3b8;
@@ -254,19 +255,18 @@ var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
               'August', 'September', 'October', 'November', 'December'];
 var typeColors = {};
 var byDate = {};
+var seenIds = {};
+var loadedMonths = {};
+var loadingMonths = {};
 var viewYear, viewMonth;
 var activeIdx = -1;
 
-function computeTypeColors() {
-  // Allocate the palette to the most frequent types over the last ~year, so the
-  // mapping stays stable as new workouts arrive; the rest share grey. Older
-  // workouts whose type drops out of the recent top-N fall back to grey too.
-  var cutoff = Date.now() - 365 * 24 * 3600 * 1000;
+function computeTypeColors(list) {
+  // Allocate the palette to the most frequent types over the last ~year (the
+  // `list` passed in), so the mapping stays stable as new months are paged in;
+  // the rest share grey, as do older types that drop out of the recent top-N.
   var counts = {};
-  workouts.forEach(function(w) {
-    if (new Date(w.start).getTime() < cutoff) return;
-    counts[w.workout_type] = (counts[w.workout_type] || 0) + 1;
-  });
+  list.forEach(function(w) { counts[w.workout_type] = (counts[w.workout_type] || 0) + 1; });
   var types = Object.keys(counts).sort(function(a, b) {
     return counts[b] - counts[a] || a.localeCompare(b);
   });
@@ -281,12 +281,79 @@ function dateKey(iso) {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 }
 
-function buildIndex() {
-  byDate = {};
-  workouts.forEach(function(w, i) {
+function addWorkouts(list) {
+  // Append-only so existing indices (and activeIdx) stay valid; dedup by id
+  // since padded month ranges and the year fetch overlap at boundaries.
+  list.forEach(function(w) {
+    if (!w.id || seenIds[w.id]) return;
+    seenIds[w.id] = true;
+    var i = workouts.length;
+    workouts.push(w);
     var k = dateKey(w.start);
     (byDate[k] = byDate[k] || []).push(i);
   });
+}
+
+function indexOfLatest() {
+  var best = 0, bestT = -Infinity;
+  for (var i = 0; i < workouts.length; i++) {
+    var t = new Date(workouts[i].start).getTime();
+    if (t > bestT) { bestT = t; best = i; }
+  }
+  return best;
+}
+
+function shiftMonth(y, m, d) {
+  m += d;
+  while (m < 0) { m += 12; y--; }
+  while (m > 11) { m -= 12; y++; }
+  return { y: y, m: m };
+}
+
+function monthKey(y, m) { return y + '-' + pad2(m + 1); }
+
+function isoUTC(ms) { return new Date(ms).toISOString().replace('Z', '+00:00'); }
+
+function monthRange(y, m) {
+  // Pad a day on each side so PST/PDT skew can't drop boundary workouts; final
+  // placement is by dateKey, and dedup handles the overlap.
+  return [isoUTC(Date.UTC(y, m, 1) - 86400000), isoUTC(Date.UTC(y, m + 1, 1) + 86400000)];
+}
+
+function markYearLoaded() {
+  // The initial year fetch fully covers every month from just after its cutoff
+  // through the current month; mark them loaded so paging doesn't refetch.
+  var now = new Date();
+  var cut = new Date(now.getTime() - 365 * 86400000);
+  var p = shiftMonth(cut.getFullYear(), cut.getMonth(), 1);  // skip the partial boundary month
+  var y = p.y, m = p.m, cy = now.getFullYear(), cm = now.getMonth();
+  while (y < cy || (y === cy && m <= cm)) {
+    loadedMonths[monthKey(y, m)] = true;
+    var n = shiftMonth(y, m, 1); y = n.y; m = n.m;
+  }
+}
+
+async function fetchMonth(y, m) {
+  var key = monthKey(y, m);
+  if (loadedMonths[key] || loadingMonths[key]) return;
+  loadingMonths[key] = true;
+  try {
+    var r = monthRange(y, m);
+    var resp = await fetch('/api/workouts?start=' + encodeURIComponent(r[0])
+      + '&end=' + encodeURIComponent(r[1]) + '&limit=500');
+    addWorkouts((await resp.json()).data || []);
+    loadedMonths[key] = true;
+  } catch (e) { /* leave unloaded; retried on next navigation */ }
+  delete loadingMonths[key];
+  if (y === viewYear && m === viewMonth) renderCalendar();
+}
+
+function ensureMonths() {
+  // Fetch the visible month plus its neighbors so paging feels instant.
+  fetchMonth(viewYear, viewMonth);
+  var p = shiftMonth(viewYear, viewMonth, -1), n = shiftMonth(viewYear, viewMonth, 1);
+  fetchMonth(p.y, p.m);
+  fetchMonth(n.y, n.m);
 }
 
 function pad2(n) { return String(n).padStart(2, '0'); }
@@ -308,8 +375,10 @@ function renderCalendar() {
   var daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   var tKey = todayKey();
 
+  var loading = !!loadingMonths[monthKey(viewYear, viewMonth)];
   var html = '<div class="cal-wrap">';
-  html += '<div class="cal-head"><div class="cal-title">' + MONTHS[viewMonth] + ' ' + viewYear + '</div>';
+  html += '<div class="cal-head"><div class="cal-title">' + MONTHS[viewMonth] + ' ' + viewYear
+    + (loading ? ' <span class="cal-load">loading…</span>' : '') + '</div>';
   html += '<div class="cal-nav">'
     + '<button class="cal-btn" id="cal-prev" title="Previous month">&lsaquo;</button>'
     + '<button class="cal-btn cal-today" id="cal-jump">Today</button>'
@@ -359,6 +428,7 @@ function renderCalendar() {
   document.getElementById('cal-jump').addEventListener('click', function() {
     var n = new Date();
     viewYear = n.getFullYear(); viewMonth = n.getMonth();
+    ensureMonths();
     renderCalendar();
   });
   document.querySelectorAll('.cal-chip').forEach(function(el) {
@@ -380,9 +450,9 @@ function legendHtml() {
 }
 
 function stepMonth(delta) {
-  viewMonth += delta;
-  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
-  else if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+  var s = shiftMonth(viewYear, viewMonth, delta);
+  viewYear = s.y; viewMonth = s.m;
+  ensureMonths();
   renderCalendar();
 }
 
@@ -395,9 +465,11 @@ function selectWorkout(idx) {
 }
 
 async function load() {
+  var now = new Date();
   var [settingsResp, resp] = await Promise.all([
     fetch('/api/settings'),
-    fetch('/api/workouts?limit=500'),
+    fetch('/api/workouts?start=' + encodeURIComponent(isoUTC(now.getTime() - 365 * 86400000))
+      + '&end=' + encodeURIComponent(isoUTC(now.getTime())) + '&limit=2000'),
   ]);
   var settings = await settingsResp.json();
   useMiles = settings.distance_unit === 'mi';
@@ -409,26 +481,34 @@ async function load() {
     parseInt(settings.hr_zone_4) || 161,
     parseInt(settings.hr_zone_5) || 180,
   ];
-  var data = await resp.json();
-  workouts = data.data || [];
+  var yearData = (await resp.json()).data || [];
 
   var app = document.getElementById('app');
-  if (workouts.length === 0) {
+  if (yearData.length === 0) {
+    // No workouts in the last year; fall back to the most recent ones so an
+    // inactive history still opens on a populated month.
+    var r2 = await fetch('/api/workouts?limit=50');
+    yearData = (await r2.json()).data || [];
+  }
+  if (yearData.length === 0) {
     app.innerHTML = '<div class="no-data">No workouts yet.</div>';
     return;
   }
 
-  computeTypeColors();
-  buildIndex();
+  addWorkouts(yearData);
+  computeTypeColors(yearData);
+  markYearLoaded();
 
   // Open on the most recent workout's month, with that workout selected.
-  var latest = dateKey(workouts[0].start).split('-');
+  var latestIdx = indexOfLatest();
+  var latest = dateKey(workouts[latestIdx].start).split('-');
   viewYear = parseInt(latest[0]);
   viewMonth = parseInt(latest[1]) - 1;
-  activeIdx = 0;
+  activeIdx = latestIdx;
 
+  ensureMonths();
   renderCalendar();
-  showDetail(0);
+  showDetail(latestIdx);
 }
 
 async function showDetail(idx) {
